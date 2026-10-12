@@ -1,0 +1,52 @@
+{
+  "name": "aihuminizer",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "test": "tsx scripts/run-tests.ts",
+    "test:agents": "tsx scripts/test-multi-agent-system.ts",
+    "test:legal": "tsx scripts/test-documentation-studio.ts",
+    "test:intelligent": "tsx scripts/test-intelligent-workflow.ts",
+    "test:workspace": "tsx scripts/test-workspace-agent.ts",
+    "test:acceptance": "tsx scripts/test-acceptance-all.ts",
+    "test:e2e": "tsx scripts/test-live-e2e.ts",
+    "test:stress": "tsx scripts/test-edge-cases-and-performance.ts",
+    "test:all": "tsx scripts/run-tests.ts && tsx scripts/test-multi-agent-system.ts && tsx scripts/test-documentation-studio.ts && tsx scripts/test-intelligent-workflow.ts && tsx scripts/test-workspace-agent.ts && tsx scripts/test-acceptance-all.ts && tsx scripts/test-edge-cases-and-performance.ts",
+    "worker": "tsx workers/standalone-worker.ts",
+    "seed": "tsx scripts/seed-demo.ts"
+  },
+  "dependencies": {
+    "@types/diff": "^7.0.2",
+    "@types/pdfkit": "^0.17.6",
+    "clsx": "^2.1.1",
+    "diff": "^9.0.0",
+    "docx": "^9.8.1",
+    "lucide-react": "^1.52.0",
+    "mammoth": "^1.13.0",
+    "next": "16.3.8",
+    "pdf-parse": "^2.4.5",
+    "pdfkit": "^0.20.2",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "tailwind-merge": "^3.7.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/pdf-parse": "^1.1.5",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "babel-plugin-react-compiler": "1.0.0",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.8",
+    "puppeteer-core": "^25.12.0",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.15",
+    "typescript": "^5"
+  }
+}
