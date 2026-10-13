@@ -19,6 +19,7 @@ export interface OmniAttachment {
   size: number;
   type: string; // 'code' | 'document' | 'image' | 'data' | 'other'
   content?: string; // text or base64
+  extractedSummary?: string;
   url?: string;
   previewUrl?: string;
 }

@@ -229,7 +229,22 @@ The draft will automatically incorporate standard definitions, trade secret carv
 4. Click the "Retry" button on the document card to re-trigger the automated pipeline.`;
     }
 
-    // Default overview
+    // Live Groq LLM Assistant with deep thinking & multi-modal execution
+    try {
+      const { GroqAgent } = await import('../ai/groq-agent');
+      const omniRes = await GroqAgent.processUserInput({
+        conversationId: activeDocumentId ? `doc_${activeDocumentId}` : 'chat_live_assistant',
+        prompt: userMessage,
+      });
+
+      if (omniRes && omniRes.content && omniRes.content.trim().length > 0) {
+        return omniRes.content;
+      }
+    } catch (llmErr) {
+      console.warn('Groq chatbot live dispatch fallback:', llmErr);
+    }
+
+    // Default overview (fallback if offline)
     return `Hello! I am the HumanFlow Assistant. I can help you with:
 • **Documentation Studio**: "Create a website development agreement", "Create a privacy policy", "Draft an NDA"
 • **Legal Analysis**: "Explain this clause", "Show missing information", "Show legal warnings", "Check this document"
