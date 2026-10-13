@@ -4,7 +4,7 @@ import { OmniFileGenerator, FileGenPayload } from '@/lib/omni/file-generator';
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const fileId = searchParams.get('fileId');
+    const fileId = searchParams.get('fileId') || searchParams.get('id');
 
     if (!fileId) {
       return NextResponse.json({ error: 'fileId parameter required' }, { status: 400 });

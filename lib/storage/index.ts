@@ -82,12 +82,24 @@ export class StorageManager {
     return targetPath;
   }
 
+  private isSafePath(filePath: string): boolean {
+    const resolvedPath = path.resolve(filePath);
+    const resolvedBase = path.resolve(this.baseDir);
+    if (process.platform === 'win32') {
+      return (
+        resolvedPath.toLowerCase().startsWith(resolvedBase.toLowerCase()) ||
+        resolvedPath.toLowerCase() === resolvedBase.toLowerCase()
+      );
+    }
+    return resolvedPath.startsWith(resolvedBase);
+  }
+
   /**
    * Retrieves a file buffer safely ensuring no path traversal.
    */
   async readFile(filePath: string): Promise<Buffer> {
     const resolvedPath = path.resolve(filePath);
-    if (!resolvedPath.startsWith(this.baseDir)) {
+    if (!this.isSafePath(resolvedPath)) {
       throw new Error('Access denied: File outside permitted storage root');
     }
 
@@ -104,7 +116,7 @@ export class StorageManager {
   fileExists(filePath: string): boolean {
     try {
       const resolvedPath = path.resolve(filePath);
-      return resolvedPath.startsWith(this.baseDir) && fs.existsSync(resolvedPath);
+      return this.isSafePath(resolvedPath) && fs.existsSync(resolvedPath);
     } catch {
       return false;
     }

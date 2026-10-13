@@ -20,46 +20,88 @@ export async function GET(
 
     let targetFilePath = doc.originalPath;
     let downloadFileName = doc.originalName;
+    let selectedText: string | null = null;
+    let isFinalVersion = false;
+    let versionNum = 1;
 
     if (type === 'original') {
       targetFilePath = doc.originalPath;
       downloadFileName = `[Original]_${doc.originalName}`;
     } else if (type === 'best') {
       const versions = repository.listVersions(id);
-      const best = versions.find((v) => v.id === doc.bestVersionId) || versions.find((v) => v.isBest) || versions[versions.length - 1];
+      const best =
+        versions.find((v) => v.id === doc.bestVersionId) ||
+        versions.find((v) => v.isBest) ||
+        versions[versions.length - 1];
       if (best) {
         targetFilePath = best.filePath;
-        const ext = path.extname(best.filePath);
+        selectedText = best.text;
+        versionNum = best.versionNumber;
+        const ext = path.extname(best.filePath) || `.${doc.fileType}`;
         downloadFileName = `[Best_v${best.versionNumber}]_${path.basename(doc.originalName, path.extname(doc.originalName))}${ext}`;
       }
     } else if (type === 'version' && versionId) {
       const version = repository.getVersion(id, versionId);
       if (version) {
         targetFilePath = version.filePath;
-        const ext = path.extname(version.filePath);
+        selectedText = version.text;
+        versionNum = version.versionNumber;
+        const ext = path.extname(version.filePath) || `.${doc.fileType}`;
         downloadFileName = `[v${version.versionNumber}]_${path.basename(doc.originalName, path.extname(doc.originalName))}${ext}`;
       }
     } else {
       // Final version
+      isFinalVersion = true;
       const versions = repository.listVersions(id);
       const finalVersion = versions.find((v) => v.isFinal) || versions[versions.length - 1];
       if (finalVersion) {
         targetFilePath = finalVersion.filePath;
-        const ext = path.extname(finalVersion.filePath);
+        selectedText = finalVersion.text;
+        versionNum = finalVersion.versionNumber;
+        const ext = path.extname(finalVersion.filePath) || `.${doc.fileType}`;
         downloadFileName = `[HumanFlow_Final]_${path.basename(doc.originalName, path.extname(doc.originalName))}${ext}`;
       }
     }
 
-    if (!storageManager.fileExists(targetFilePath)) {
+    let fileBuffer: Buffer | null = null;
+
+    if (storageManager.fileExists(targetFilePath)) {
+      fileBuffer = await storageManager.readFile(targetFilePath);
+    } else if (selectedText) {
+      // Self-healing: if file on disk was missing, generate it on-the-fly from preserved version text
+      const { DocumentGenerator } = await import('@/lib/document/generator');
+      fileBuffer = await DocumentGenerator.generate(selectedText, doc.fileType, doc.originalName);
+      try {
+        await storageManager.saveVersionFile(
+          fileBuffer,
+          id,
+          versionNum,
+          doc.fileType,
+          isFinalVersion
+        );
+      } catch {
+        // Continue serving even if saving cache fails
+      }
+    }
+
+    if (!fileBuffer) {
+      if (doc.status === 'FAILED') {
+        return NextResponse.json(
+          {
+            error: `Document processing failed: ${doc.errorMessage || 'Unknown error'}. You can download the original file using "?type=original".`,
+          },
+          { status: 422 }
+        );
+      }
       return NextResponse.json(
-        { error: 'File not available on disk yet. Processing may still be underway.' },
+        {
+          error: `File not available yet. Current status: ${doc.status}. Please wait a moment for processing to complete.`,
+        },
         { status: 404 }
       );
     }
 
-    const fileBuffer = await storageManager.readFile(targetFilePath);
-
-    const ext = path.extname(targetFilePath).toLowerCase();
+    const ext = path.extname(downloadFileName).toLowerCase();
     const contentTypeMap: Record<string, string> = {
       '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       '.pdf': 'application/pdf',
@@ -70,13 +112,14 @@ export async function GET(
     };
 
     const contentType = contentTypeMap[ext] || 'application/octet-stream';
+    const cleanAscii = downloadFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
 
-    // Set secure download headers
+    // Set secure, RFC-compliant download headers
     return new NextResponse(new Uint8Array(fileBuffer), {
       status: 200,
       headers: {
         'Content-Type': contentType,
-        'Content-Disposition': `attachment; filename="${encodeURIComponent(downloadFileName)}"`,
+        'Content-Disposition': `attachment; filename="${cleanAscii}"; filename*=UTF-8''${encodeURIComponent(downloadFileName)}`,
         'Cache-Control': 'no-store, max-age=0',
       },
     });
