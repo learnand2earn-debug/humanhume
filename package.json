@@ -18,7 +18,8 @@
     "test:acceptance": "tsx scripts/test-acceptance-all.ts",
     "test:e2e": "tsx scripts/test-live-e2e.ts",
     "test:stress": "tsx scripts/test-edge-cases-and-performance.ts",
-    "test:all": "tsx scripts/run-tests.ts && tsx scripts/test-multi-agent-system.ts && tsx scripts/test-documentation-studio.ts && tsx scripts/test-intelligent-workflow.ts && tsx scripts/test-workspace-agent.ts && tsx scripts/test-acceptance-all.ts && tsx scripts/test-edge-cases-and-performance.ts",
+    "test:forge": "tsx scripts/test-world-file-forge.ts",
+    "test:all": "tsx scripts/run-tests.ts && tsx scripts/test-multi-agent-system.ts && tsx scripts/test-documentation-studio.ts && tsx scripts/test-intelligent-workflow.ts && tsx scripts/test-workspace-agent.ts && tsx scripts/test-world-file-forge.ts && tsx scripts/test-acceptance-all.ts && tsx scripts/test-edge-cases-and-performance.ts",
     "worker": "tsx workers/standalone-worker.ts",
     "seed": "tsx scripts/seed-demo.ts"
   },
@@ -28,6 +29,7 @@
     "clsx": "^2.1.1",
     "diff": "^9.0.0",
     "docx": "^9.8.1",
+    "jszip": "^3.10.2",
     "lucide-react": "^1.52.0",
     "mammoth": "^1.13.0",
     "next": "16.3.8",
