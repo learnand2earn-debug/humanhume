@@ -3,20 +3,26 @@ import path from 'path';
 import { WorkflowSession, WorkflowStage } from './types';
 
 export class IntelligentSessionRepository {
-  private static dataFile = path.resolve(process.cwd(), 'data', 'intelligent_sessions.json');
+  private static getDataFile(): string {
+    const dataDir = process.env.DATA_DIR
+      ? path.resolve(process.env.DATA_DIR)
+      : path.resolve(process.cwd(), 'data');
+    return path.resolve(dataDir, 'intelligent_sessions.json');
+  }
   private static sessions: Map<string, WorkflowSession> = new Map();
   private static initialized = false;
 
   private static init() {
     if (this.initialized) return;
-    const dataDir = path.dirname(this.dataFile);
+    const dataFile = this.getDataFile();
+    const dataDir = path.dirname(dataFile);
     if (!fs.existsSync(dataDir)) {
       fs.mkdirSync(dataDir, { recursive: true });
     }
 
-    if (fs.existsSync(this.dataFile)) {
+    if (fs.existsSync(dataFile)) {
       try {
-        const raw = fs.readFileSync(this.dataFile, 'utf-8');
+        const raw = fs.readFileSync(dataFile, 'utf-8');
         const list: WorkflowSession[] = JSON.parse(raw);
         list.forEach((s) => this.sessions.set(s.id, s));
       } catch (err) {
@@ -28,8 +34,9 @@ export class IntelligentSessionRepository {
 
   private static persist() {
     try {
+      const dataFile = this.getDataFile();
       const list = Array.from(this.sessions.values());
-      fs.writeFileSync(this.dataFile, JSON.stringify(list, null, 2), 'utf-8');
+      fs.writeFileSync(dataFile, JSON.stringify(list, null, 2), 'utf-8');
     } catch (err) {
       console.error('Failed to persist intelligent sessions to disk:', err);
     }

@@ -10,7 +10,9 @@ export class StorageManager {
   private tempDir: string;
 
   constructor() {
-    this.baseDir = path.resolve(process.cwd(), 'storage');
+    this.baseDir = process.env.STORAGE_DIR
+      ? path.resolve(process.env.STORAGE_DIR)
+      : path.resolve(process.cwd(), 'storage');
     this.originalDir = path.join(this.baseDir, 'original');
     this.processingDir = path.join(this.baseDir, 'processing');
     this.finalDir = path.join(this.baseDir, 'final');

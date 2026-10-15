@@ -42,7 +42,9 @@ export class LegalRepository {
   private lastSyncMtime = 0;
 
   constructor() {
-    const dataDir = path.resolve(process.cwd(), 'data');
+    const dataDir = process.env.DATA_DIR
+      ? path.resolve(process.env.DATA_DIR)
+      : path.resolve(process.cwd(), 'data');
     if (!fs.existsSync(dataDir)) {
       fs.mkdirSync(dataDir, { recursive: true });
     }
