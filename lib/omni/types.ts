@@ -33,7 +33,7 @@ export interface OmniThought {
 export interface GeneratedFileMeta {
   id: string;
   fileName: string;
-  fileType: 'docx' | 'xlsx' | 'pdf' | 'html' | 'py' | 'tsx' | 'ts' | 'js' | 'json' | 'md' | 'csv' | 'txt';
+  fileType: string;
   sizeBytes: number;
   downloadUrl: string;
   contentSnippet?: string;

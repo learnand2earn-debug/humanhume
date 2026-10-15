@@ -10,6 +10,7 @@ import DiffViewer from '@/components/DiffViewer';
 import VersionHistory from '@/components/VersionHistory';
 import AnimatedChatbot from '@/components/AnimatedChatbot';
 import CentralDashboard from '@/components/dashboard/CentralDashboard';
+import UniversalFileStudio from '@/components/dashboard/UniversalFileStudio';
 
 import { DocumentDiff, DocumentRecord, DocumentVersion, JobStatus } from '@/lib/types';
 import {
@@ -43,9 +44,9 @@ import {
 export default function HomePage() {
   const router = useRouter();
 
-  // Active Studio Tab: 'pipeline' | 'workspace' | 'specialists' | 'intelligent' | 'legal'
+  // Active Studio Tab: 'pipeline' | 'workspace' | 'specialists' | 'file_forge' | 'intelligent' | 'legal'
   const [activeStudio, setActiveStudio] = useState<
-    'pipeline' | 'workspace' | 'specialists' | 'intelligent' | 'legal'
+    'pipeline' | 'workspace' | 'specialists' | 'file_forge' | 'intelligent' | 'legal'
   >('pipeline');
 
   // Document pipeline states
@@ -172,7 +173,7 @@ export default function HomePage() {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       const viewParam = params.get('view');
-      if (viewParam === 'pipeline' || viewParam === 'workspace' || viewParam === 'specialists' || viewParam === 'intelligent' || viewParam === 'legal') {
+      if (viewParam === 'pipeline' || viewParam === 'workspace' || viewParam === 'specialists' || viewParam === 'file_forge' || viewParam === 'intelligent' || viewParam === 'legal') {
         setActiveStudio(viewParam);
       }
       const docIdParam = params.get('docId');
@@ -636,6 +637,22 @@ export default function HomePage() {
               </button>
 
               <button
+                onClick={() => setActiveStudio('file_forge')}
+                id="tab-file-forge"
+                className={`px-4 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition-all duration-200 ${
+                  activeStudio === 'file_forge'
+                    ? 'bg-gradient-to-r from-violet-600 via-indigo-600 to-cyan-500 text-white shadow-lg shadow-indigo-500/25 border border-indigo-400/40 ring-1 ring-cyan-400/50'
+                    : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
+                }`}
+              >
+                <Layers className="w-4 h-4 text-cyan-300 animate-pulse" />
+                <span className="flex items-center gap-1.5">
+                  Universal File Forge
+                  <span className="px-1.5 py-0.5 text-[10px] bg-cyan-500/20 text-cyan-300 rounded font-semibold border border-cyan-500/30">Any Format</span>
+                </span>
+              </button>
+
+              <button
                 onClick={() => setActiveStudio('intelligent')}
                 id="tab-intelligent"
                 className={`px-4 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition-all duration-200 ${
@@ -902,6 +919,11 @@ export default function HomePage() {
             {/* 3. SPECIALIST AGENT TRIO HUB */}
             {activeStudio === 'specialists' && (
               <CentralDashboard onSwitchToDocumentPipeline={() => setActiveStudio('pipeline')} />
+            )}
+
+            {/* UNIVERSAL FILE FORGE (ANY FILE GENERATION ENGINE) */}
+            {activeStudio === 'file_forge' && (
+              <UniversalFileStudio />
             )}
 
             {/* 4. INTELLIGENT VERIFICATION HUB */}

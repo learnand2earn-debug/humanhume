@@ -49,5 +49,7 @@ next-env.d.ts
 !/storage/final/.gitkeep
 /storage/temp/*
 !/storage/temp/.gitkeep
+/scratch
+
 /data/*
 !/data/.gitkeep
