@@ -67,7 +67,10 @@ export default function OmniChatLayout({ onSwitchToPipeline }: OmniChatLayoutPro
   const loadConversations = async () => {
     try {
       const res = await fetch('/api/omni/chat');
-      const data = await res.json();
+      if (!res.ok) return;
+      const rawText = await res.text();
+      if (!rawText || rawText.includes('upstream error')) return;
+      const data = JSON.parse(rawText);
       if (data.conversations && data.conversations.length > 0) {
         setConversations(data.conversations);
         if (!activeId) {
@@ -194,7 +197,19 @@ export default function OmniChatLayout({ onSwitchToPipeline }: OmniChatLayoutPro
         }),
       });
 
-      const data = await res.json();
+      const rawText = await res.text();
+      if (!rawText || rawText.includes('upstream error')) {
+        console.warn('Omni chat service response not JSON or upstream reconnecting');
+        return;
+      }
+
+      let data: any;
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        return;
+      }
+
       if (data.conversation) {
         setConversations((prev) =>
           prev.map((c) => (c.id === data.conversation.id ? data.conversation : c))

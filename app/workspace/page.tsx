@@ -45,7 +45,10 @@ export default function WorkspacePage() {
   const loadConversations = async () => {
     try {
       const res = await fetch('/api/workspace/conversations');
-      const data = await res.json();
+      if (!res.ok) return;
+      const rawText = await res.text();
+      if (!rawText || rawText.includes('upstream error')) return;
+      const data = JSON.parse(rawText);
       if (data.conversations) {
         setConversations(data.conversations);
         // Check URL query parameters
@@ -68,7 +71,10 @@ export default function WorkspacePage() {
   const loadConversationDetails = async (id: string) => {
     try {
       const res = await fetch(`/api/workspace/conversations/${id}`);
-      const data = await res.json();
+      if (!res.ok) return;
+      const rawText = await res.text();
+      if (!rawText || rawText.includes('upstream error')) return;
+      const data = JSON.parse(rawText);
       if (data.conversation) {
         setActiveConversation(data.conversation);
       }
@@ -103,7 +109,10 @@ export default function WorkspacePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: 'New Autonomous Task' }),
       });
-      const data = await res.json();
+      if (!res.ok) return;
+      const rawText = await res.text();
+      if (!rawText || rawText.includes('upstream error')) return;
+      const data = JSON.parse(rawText);
       if (data.conversation) {
         setConversations((prev) => [data.conversation, ...prev]);
         setActiveId(data.conversation.id);
@@ -231,7 +240,17 @@ export default function WorkspacePage() {
         body: formData,
       });
 
-      const data = await res.json();
+      if (!res.ok) {
+        const rawErr = await res.text().catch(() => '');
+        if (rawErr.toLowerCase().includes('upstream error')) {
+          setLoadingStatusText('Server is warming up, please retry in a moment...');
+        }
+        return;
+      }
+
+      const rawText = await res.text();
+      if (!rawText || rawText.includes('upstream error')) return;
+      const data = JSON.parse(rawText);
       if (data.conversation) {
         setActiveConversation(data.conversation);
         setConversations((prev) =>

@@ -17,6 +17,7 @@ import {
   ShieldCheck,
   Zap,
   Download,
+  Loader2,
   FileText,
   RotateCcw,
   CheckCircle2,
@@ -80,6 +81,66 @@ export default function HomePage() {
   const [vaultSearch, setVaultSearch] = useState('');
   const [quickPrompt, setQuickPrompt] = useState('');
   const [bridgingStatus, setBridgingStatus] = useState<string | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const handleDownloadFinal = async (
+    e: React.MouseEvent,
+    docId: string,
+    originalName: string
+  ) => {
+    e.preventDefault();
+    if (isDownloading) return;
+    setIsDownloading(true);
+
+    try {
+      const downloadUrl = `/api/documents/${docId}/download?type=final`;
+      const res = await fetch(downloadUrl);
+
+      if (!res.ok) {
+        let errMsg = `Server returned status ${res.status}`;
+        try {
+          const contentType = res.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            const errJson = await res.json();
+            errMsg = errJson.error || errMsg;
+          } else {
+            const rawText = await res.text();
+            if (rawText.toLowerCase().includes('upstream error')) {
+              errMsg = 'Server is currently warming up or reconnecting. Please retry in a few moments.';
+            } else if (rawText) {
+              errMsg = rawText.slice(0, 200);
+            }
+          }
+        } catch {
+          // fallback
+        }
+        alert(errMsg);
+        return;
+      }
+
+      const blob = await res.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+
+      const contentDisposition = res.headers.get('content-disposition') || '';
+      let fileName = `HumanFlow_Final_${originalName}`;
+      const match = contentDisposition.match(/filename="?([^";]+)"?/);
+      if (match && match[1]) {
+        fileName = match[1].trim();
+      }
+
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (err: any) {
+      alert(`Download could not complete: ${err.message || 'Network error'}`);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
 
   const handleSelectRecent = async (doc: DocumentRecord) => {
     setActiveDocument(doc);
@@ -88,11 +149,11 @@ export default function HomePage() {
       setPipelineFinished(true);
       try {
         const [diffRes, verRes] = await Promise.all([
-          fetch(`/api/documents/${doc.id}/diff`).then((r) => r.json()),
-          fetch(`/api/documents/${doc.id}/versions`).then((r) => r.json()),
+          fetch(`/api/documents/${doc.id}/diff`).then(async (r) => (r.ok ? r.json() : null)).catch(() => null),
+          fetch(`/api/documents/${doc.id}/versions`).then(async (r) => (r.ok ? r.json() : null)).catch(() => null),
         ]);
-        setDiffData(diffRes);
-        setVersions(verRes.versions || []);
+        if (diffRes) setDiffData(diffRes);
+        if (verRes?.versions) setVersions(verRes.versions);
       } catch (err) {
         console.error('Failed to load document details:', err);
       }
@@ -117,9 +178,9 @@ export default function HomePage() {
       const docIdParam = params.get('docId');
       if (docIdParam) {
         fetch(`/api/documents/${docIdParam}`)
-          .then((r) => r.json())
+          .then(async (r) => (r.ok ? r.json() : null))
           .then((data) => {
-            if (data.document) {
+            if (data?.document) {
               handleSelectRecent(data.document);
             }
           })
@@ -130,8 +191,9 @@ export default function HomePage() {
 
   const loadPlatformData = () => {
     fetch('/api/system/overview')
-      .then((r) => r.json())
+      .then(async (r) => (r.ok ? r.json() : null))
       .then((data) => {
+        if (!data) return;
         if (data.stats) {
           setPlatformStats(data.stats);
         }
@@ -163,8 +225,8 @@ export default function HomePage() {
     loadPlatformData();
     if (activeDocument) {
       try {
-        const docRes = await fetch(`/api/documents/${activeDocument.id}`).then((r) => r.json());
-        if (docRes.document) {
+        const docRes = await fetch(`/api/documents/${activeDocument.id}`).then(async (r) => (r.ok ? r.json() : null)).catch(() => null);
+        if (docRes?.document) {
           setActiveDocument(docRes.document);
         }
       } catch (err) {
@@ -177,11 +239,11 @@ export default function HomePage() {
     if (activeDocument && status !== 'FAILED') {
       try {
         const [diffRes, verRes] = await Promise.all([
-          fetch(`/api/documents/${activeDocument.id}/diff`).then((r) => r.json()),
-          fetch(`/api/documents/${activeDocument.id}/versions`).then((r) => r.json()),
+          fetch(`/api/documents/${activeDocument.id}/diff`).then(async (r) => (r.ok ? r.json() : null)).catch(() => null),
+          fetch(`/api/documents/${activeDocument.id}/versions`).then(async (r) => (r.ok ? r.json() : null)).catch(() => null),
         ]);
-        setDiffData(diffRes);
-        setVersions(verRes.versions || []);
+        if (diffRes) setDiffData(diffRes);
+        if (verRes?.versions) setVersions(verRes.versions);
       } catch (err) {
         console.error('Failed to load final diff data:', err);
       }
@@ -707,10 +769,16 @@ export default function HomePage() {
                         <a
                           href={`/api/documents/${activeDocument.id}/download?type=final`}
                           id="btn-hero-download-final"
-                          className="glow-btn px-5 py-2.5 rounded-xl text-white text-xs font-bold flex items-center gap-2 transition-all shadow-xl"
+                          download={`HumanFlow_Final_${activeDocument.originalName}`}
+                          onClick={(e) => handleDownloadFinal(e, activeDocument.id, activeDocument.originalName)}
+                          className="glow-btn px-5 py-2.5 rounded-xl text-white text-xs font-bold flex items-center gap-2 transition-all shadow-xl cursor-pointer"
                         >
-                          <Download className="w-4 h-4" />
-                          <span>Download Final</span>
+                          {isDownloading ? (
+                            <Loader2 className="w-4 h-4 animate-spin text-cyan-300" />
+                          ) : (
+                            <Download className="w-4 h-4" />
+                          )}
+                          <span>{isDownloading ? 'Downloading...' : 'Download Final'}</span>
                         </a>
 
                         <button

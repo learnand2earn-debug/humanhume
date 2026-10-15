@@ -39,9 +39,9 @@ export default function Navbar() {
 
   useEffect(() => {
     fetch('/api/admin/settings')
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (data.settings?.mode) {
+        if (data?.settings?.mode) {
           setMode(data.settings.mode);
         }
       })
@@ -49,9 +49,9 @@ export default function Navbar() {
 
     const fetchStats = () => {
       fetch('/api/system/overview')
-        .then((r) => r.json())
+        .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
-          if (data.stats) {
+          if (data?.stats) {
             setStats({
               totalDocuments: data.stats.totalDocuments,
               processingDocuments: data.stats.processingDocuments,

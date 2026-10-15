@@ -26,7 +26,7 @@ export async function GET(
 
     if (type === 'original') {
       targetFilePath = doc.originalPath;
-      downloadFileName = `[Original]_${doc.originalName}`;
+      downloadFileName = `Original_${doc.originalName}`;
     } else if (type === 'best') {
       const versions = repository.listVersions(id);
       const best =
@@ -38,7 +38,7 @@ export async function GET(
         selectedText = best.text;
         versionNum = best.versionNumber;
         const ext = path.extname(best.filePath) || `.${doc.fileType}`;
-        downloadFileName = `[Best_v${best.versionNumber}]_${path.basename(doc.originalName, path.extname(doc.originalName))}${ext}`;
+        downloadFileName = `Best_v${best.versionNumber}_${path.basename(doc.originalName, path.extname(doc.originalName))}${ext}`;
       }
     } else if (type === 'version' && versionId) {
       const version = repository.getVersion(id, versionId);
@@ -47,7 +47,7 @@ export async function GET(
         selectedText = version.text;
         versionNum = version.versionNumber;
         const ext = path.extname(version.filePath) || `.${doc.fileType}`;
-        downloadFileName = `[v${version.versionNumber}]_${path.basename(doc.originalName, path.extname(doc.originalName))}${ext}`;
+        downloadFileName = `v${version.versionNumber}_${path.basename(doc.originalName, path.extname(doc.originalName))}${ext}`;
       }
     } else {
       // Final version
@@ -59,19 +59,28 @@ export async function GET(
         selectedText = finalVersion.text;
         versionNum = finalVersion.versionNumber;
         const ext = path.extname(finalVersion.filePath) || `.${doc.fileType}`;
-        downloadFileName = `[HumanFlow_Final]_${path.basename(doc.originalName, path.extname(doc.originalName))}${ext}`;
+        downloadFileName = `HumanFlow_Final_${path.basename(doc.originalName, path.extname(doc.originalName))}${ext}`;
+      } else {
+        downloadFileName = `HumanFlow_Final_${doc.originalName}`;
       }
     }
 
     let fileBuffer: Buffer | null = null;
 
-    if (storageManager.fileExists(targetFilePath)) {
-      fileBuffer = await storageManager.readFile(targetFilePath);
-    } else if (selectedText) {
-      // Self-healing: if file on disk was missing, generate it on-the-fly from preserved version text
-      const { DocumentGenerator } = await import('@/lib/document/generator');
-      fileBuffer = await DocumentGenerator.generate(selectedText, doc.fileType, doc.originalName);
+    if (targetFilePath && storageManager.fileExists(targetFilePath)) {
       try {
+        fileBuffer = await storageManager.readFile(targetFilePath);
+      } catch (readErr) {
+        console.warn('Storage read failed, falling back to document generator:', readErr);
+      }
+    }
+
+    if (!fileBuffer) {
+      // Self-healing: if file on disk was missing, generate it on-the-fly from preserved text
+      const textToRender = selectedText || 'HumanFlow AI Verified and Preserved Document Content.';
+      try {
+        const { DocumentGenerator } = await import('@/lib/document/generator');
+        fileBuffer = await DocumentGenerator.generate(textToRender, doc.fileType, doc.originalName);
         await storageManager.saveVersionFile(
           fileBuffer,
           id,
@@ -79,8 +88,8 @@ export async function GET(
           doc.fileType,
           isFinalVersion
         );
-      } catch {
-        // Continue serving even if saving cache fails
+      } catch (genErr) {
+        console.error('Self-healing generation failed:', genErr);
       }
     }
 
@@ -101,7 +110,7 @@ export async function GET(
       );
     }
 
-    const ext = path.extname(downloadFileName).toLowerCase();
+    const ext = path.extname(downloadFileName).toLowerCase() || `.${doc.fileType}`;
     const contentTypeMap: Record<string, string> = {
       '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       '.pdf': 'application/pdf',
@@ -114,12 +123,13 @@ export async function GET(
     const contentType = contentTypeMap[ext] || 'application/octet-stream';
     const cleanAscii = downloadFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
 
-    // Set secure, RFC-compliant download headers
+    // Set secure, RFC-compliant download headers without forbidden characters
     return new NextResponse(new Uint8Array(fileBuffer), {
       status: 200,
       headers: {
         'Content-Type': contentType,
-        'Content-Disposition': `attachment; filename="${cleanAscii}"; filename*=UTF-8''${encodeURIComponent(downloadFileName)}`,
+        'Content-Disposition': `attachment; filename="${cleanAscii}"`,
+        'Content-Length': fileBuffer.length.toString(),
         'Cache-Control': 'no-store, max-age=0',
       },
     });

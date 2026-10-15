@@ -97,8 +97,30 @@ export default function ProcessingTimeline({
     const fetchStatus = async () => {
       try {
         const res = await fetch(`/api/documents/${documentId}/status`);
-        if (!res.ok) throw new Error('Status check failed');
-        const json: StatusPayload = await res.json();
+        if (!res.ok) {
+          if (isMounted) {
+            timer = setTimeout(fetchStatus, 2500);
+          }
+          return;
+        }
+
+        const rawText = await res.text();
+        if (!rawText || rawText.includes('upstream error')) {
+          if (isMounted) {
+            timer = setTimeout(fetchStatus, 2500);
+          }
+          return;
+        }
+
+        let json: StatusPayload;
+        try {
+          json = JSON.parse(rawText);
+        } catch {
+          if (isMounted) {
+            timer = setTimeout(fetchStatus, 2500);
+          }
+          return;
+        }
 
         if (isMounted) {
           setData(json);

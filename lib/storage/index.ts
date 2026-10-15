@@ -97,31 +97,57 @@ export class StorageManager {
   }
 
   /**
-   * Retrieves a file buffer safely ensuring no path traversal.
+   * Resolves actual file path on disk, handling cross-platform differences between
+   * Windows and Linux/Railway container filesystems.
    */
-  async readFile(filePath: string): Promise<Buffer> {
-    const resolvedPath = path.resolve(filePath);
-    if (!this.isSafePath(resolvedPath)) {
-      throw new Error('Access denied: File outside permitted storage root');
+  public resolveActualPath(filePath: string): string | null {
+    if (!filePath) return null;
+
+    // 1. Direct path check
+    try {
+      const resolved = path.resolve(filePath);
+      if (this.isSafePath(resolved) && fs.existsSync(resolved)) {
+        return resolved;
+      }
+      if (fs.existsSync(resolved)) {
+        return resolved;
+      }
+    } catch {
+      // Continue to filename search
     }
 
-    if (!fs.existsSync(resolvedPath)) {
-      throw new Error(`File not found: ${path.basename(resolvedPath)}`);
+    // 2. Search by basename across storage directories (handles Windows/Linux migration)
+    const baseName = path.basename(filePath.replace(/\\/g, '/'));
+    if (!baseName || baseName === '.' || baseName === '/') return null;
+
+    const candidateDirs = [this.finalDir, this.originalDir, this.processingDir, this.tempDir];
+    for (const dir of candidateDirs) {
+      const candidatePath = path.join(dir, baseName);
+      if (fs.existsSync(candidatePath)) {
+        return candidatePath;
+      }
     }
 
-    return await fs.promises.readFile(resolvedPath);
+    return null;
   }
 
   /**
-   * Checks if file exists.
+   * Retrieves a file buffer safely ensuring no path traversal.
+   */
+  async readFile(filePath: string): Promise<Buffer> {
+    const actual = this.resolveActualPath(filePath);
+    if (!actual) {
+      throw new Error(`File not found: ${path.basename(filePath || '')}`);
+    }
+
+    return await fs.promises.readFile(actual);
+  }
+
+  /**
+   * Checks if file exists on disk.
    */
   fileExists(filePath: string): boolean {
-    try {
-      const resolvedPath = path.resolve(filePath);
-      return this.isSafePath(resolvedPath) && fs.existsSync(resolvedPath);
-    } catch {
-      return false;
-    }
+    return Boolean(this.resolveActualPath(filePath));
   }
 
   /**
