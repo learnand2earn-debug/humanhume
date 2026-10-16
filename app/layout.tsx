@@ -10,6 +10,8 @@ export const metadata: Metadata = {
   },
 };
 
+import ClientShieldProvider from '@/components/ClientShieldProvider';
+
 export default function RootLayout({
   children,
 }: {
@@ -26,6 +28,7 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-full flex flex-col bg-[#060913] text-slate-100 selection:bg-cyan-500/30 selection:text-cyan-200">
+        <ClientShieldProvider />
         {children}
       </body>
     </html>

@@ -1,4 +1,41 @@
-export type AgentType = 'humanizer' | 'bypass' | 'marketing';
+export type AgentType = 'generator' | 'humanizer' | 'bypass' | 'marketing';
+
+export type GeneratorContentType =
+  | 'article'
+  | 'essay'
+  | 'blog_post'
+  | 'academic_paper'
+  | 'email'
+  | 'story'
+  | 'report'
+  | 'speech';
+
+export type GeneratorLength = 'short' | 'medium' | 'long' | 'comprehensive';
+export type GeneratorTone = 'informative' | 'academic' | 'persuasive' | 'creative' | 'casual' | 'executive';
+
+export interface GeneratorOptions {
+  contentType: GeneratorContentType;
+  length: GeneratorLength;
+  tone: GeneratorTone;
+  targetAudience?: string;
+  keyPoints?: string[];
+  autoHumanize?: boolean;
+}
+
+export interface GeneratorResult {
+  title: string;
+  content: string;
+  humanizedContent?: string;
+  humanScore?: number;
+  contentType: GeneratorContentType;
+  tone: GeneratorTone;
+  wordCount: number;
+  charCount: number;
+  readingTimeMinutes: number;
+  processingTimeMs: number;
+  outline?: string[];
+  keyTakeaways?: string[];
+}
 
 export type HumanizerTone =
   | 'conversational'

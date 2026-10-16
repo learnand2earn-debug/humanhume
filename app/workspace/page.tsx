@@ -10,6 +10,7 @@ import QuestionFormWidget from '@/components/workspace/QuestionFormWidget';
 import ArtifactWidget from '@/components/workspace/ArtifactWidget';
 import Composer from '@/components/workspace/Composer';
 import { UniversalConversation, AgentMessage, MessageAttachment } from '@/lib/agent/types';
+import { safeFetchJson } from '@/lib/utils/safe-json';
 import {
   Sparkles,
   Bot,
@@ -137,13 +138,12 @@ export default function WorkspacePage() {
 
   const handleRenameConversation = async (id: string, newTitle: string) => {
     try {
-      const res = await fetch(`/api/workspace/conversations/${id}`, {
+      const { ok, data } = await safeFetchJson<{ conversation: UniversalConversation }>(`/api/workspace/conversations/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: newTitle }),
       });
-      const data = await res.json();
-      if (data.conversation) {
+      if (ok && data?.conversation) {
         setConversations((prev) =>
           prev.map((c) => (c.id === id ? { ...c, title: newTitle } : c))
         );
@@ -171,13 +171,12 @@ export default function WorkspacePage() {
     // If no active conversation, create one first
     if (!currentConvId) {
       try {
-        const createRes = await fetch('/api/workspace/conversations', {
+        const { ok, data: createData } = await safeFetchJson<{ conversation: UniversalConversation }>('/api/workspace/conversations', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ title: text.slice(0, 35) || 'New Autonomous Task' }),
         });
-        const createData = await createRes.json();
-        if (createData.conversation) {
+        if (ok && createData?.conversation) {
           currentConvId = createData.conversation.id;
           setActiveId(currentConvId);
           setConversations((prev) => [createData.conversation, ...prev]);

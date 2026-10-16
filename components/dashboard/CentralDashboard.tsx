@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { AgentHistoryItem, AgentType } from '@/lib/agents/types';
 import HumanizerAgentView from './HumanizerAgentView';
+import GeneratorAgentView from './GeneratorAgentView';
 import BypassAgentView from './BypassAgentView';
 import MediaMarketingAgentView from './MediaMarketingAgentView';
 import AgentHistoryDrawer from './AgentHistoryDrawer';
@@ -18,7 +19,11 @@ import {
   Award,
   Zap,
   ListTodo,
+  PenTool,
+  ShieldCheck,
 } from 'lucide-react';
+
+import { safeFetchJson } from '@/lib/utils/safe-json';
 
 interface CentralDashboardProps {
   onSwitchToDocumentPipeline?: () => void;
@@ -33,9 +38,8 @@ export default function CentralDashboard({ onSwitchToDocumentPipeline }: Central
 
   const fetchHistory = async () => {
     try {
-      const res = await fetch('/api/agents/history');
-      const data = await res.json();
-      if (data.success && data.history) {
+      const { ok, data } = await safeFetchJson<{ success: boolean; history: AgentHistoryItem[] }>('/api/agents/history');
+      if (ok && data?.success && data?.history) {
         setHistoryItems(data.history);
       }
     } catch {
@@ -88,7 +92,7 @@ export default function CentralDashboard({ onSwitchToDocumentPipeline }: Central
             Multi-Agentic AI Platform:
           </span>
           <span className="text-white font-bold">
-            All 3 AI Agents Online
+            All 4 AI Agents Online
           </span>
           <span className="text-slate-400 hidden md:inline">| Developer: Aqeel Abbas</span>
         </div>
@@ -135,79 +139,104 @@ export default function CentralDashboard({ onSwitchToDocumentPipeline }: Central
       </div>
 
       {/* Primary Agent Switcher Navigation */}
-      <div className="glass-card p-2 rounded-2xl border border-white/10 grid grid-cols-2 lg:grid-cols-4 gap-2">
-        {/* Agent 1 Tab */}
+      <div className="glass-card p-2 rounded-2xl border border-white/10 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
+        {/* Agent 01: AI Generator Tab */}
         <button
-          onClick={() => setActiveAgent('humanizer')}
-          className={`p-3.5 rounded-xl flex items-center gap-3 text-left transition-all duration-200 ${
-            activeAgent === 'humanizer'
+          onClick={() => setActiveAgent('generator')}
+          className={`p-3 rounded-xl flex items-center gap-2.5 text-left transition-all duration-200 ${
+            activeAgent === 'generator'
               ? 'bg-gradient-to-r from-cyan-500/20 to-blue-500/20 border border-cyan-500/40 shadow-lg shadow-cyan-500/10'
               : 'hover:bg-white/[0.04] text-slate-400 hover:text-slate-200 border border-transparent'
           }`}
         >
           <div
-            className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-              activeAgent === 'humanizer'
+            className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+              activeAgent === 'generator'
                 ? 'bg-cyan-500/30 text-cyan-300'
                 : 'bg-white/5 text-slate-400'
             }`}
           >
-            <Sparkles className="w-5 h-5" />
+            <PenTool className="w-4 h-4" />
           </div>
           <div>
             <div className="text-[10px] font-mono uppercase font-bold text-cyan-400">Agent 01</div>
-            <div className="text-xs sm:text-sm font-bold text-white">AI Humanizer</div>
-            <div className="text-[11px] text-slate-400 hidden sm:block">Natural Cadence & Tone</div>
+            <div className="text-xs font-bold text-white">AI Generator</div>
+            <div className="text-[10px] text-slate-400 hidden sm:block">Articles & Essays</div>
           </div>
         </button>
 
-        {/* Agent 2 Tab */}
+        {/* Agent 02: AI Humanizer Tab */}
+        <button
+          onClick={() => setActiveAgent('humanizer')}
+          className={`p-3 rounded-xl flex items-center gap-2.5 text-left transition-all duration-200 ${
+            activeAgent === 'humanizer'
+              ? 'bg-gradient-to-r from-emerald-500/20 to-teal-500/20 border border-emerald-500/40 shadow-lg shadow-emerald-500/10'
+              : 'hover:bg-white/[0.04] text-slate-400 hover:text-slate-200 border border-transparent'
+          }`}
+        >
+          <div
+            className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+              activeAgent === 'humanizer'
+                ? 'bg-emerald-500/30 text-emerald-300'
+                : 'bg-white/5 text-slate-400'
+            }`}
+          >
+            <ShieldCheck className="w-4 h-4" />
+          </div>
+          <div>
+            <div className="text-[10px] font-mono uppercase font-bold text-emerald-400">Agent 02</div>
+            <div className="text-xs font-bold text-white">AI Humanizer</div>
+            <div className="text-[10px] text-slate-400 hidden sm:block">98%+ Bypass Score</div>
+          </div>
+        </button>
+
+        {/* Agent 03: AI Bypass Tab */}
         <button
           onClick={() => setActiveAgent('bypass')}
-          className={`p-3.5 rounded-xl flex items-center gap-3 text-left transition-all duration-200 ${
+          className={`p-3 rounded-xl flex items-center gap-2.5 text-left transition-all duration-200 ${
             activeAgent === 'bypass'
               ? 'bg-gradient-to-r from-indigo-500/20 to-purple-500/20 border border-indigo-500/40 shadow-lg shadow-indigo-500/10'
               : 'hover:bg-white/[0.04] text-slate-400 hover:text-slate-200 border border-transparent'
           }`}
         >
           <div
-            className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+            className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
               activeAgent === 'bypass'
                 ? 'bg-indigo-500/30 text-indigo-300'
                 : 'bg-white/5 text-slate-400'
             }`}
           >
-            <Shield className="w-5 h-5" />
+            <Shield className="w-4 h-4" />
           </div>
           <div>
-            <div className="text-[10px] font-mono uppercase font-bold text-indigo-400">Agent 02</div>
-            <div className="text-xs sm:text-sm font-bold text-white">AI Bypass & Transform</div>
-            <div className="text-[11px] text-slate-400 hidden sm:block">Side-by-Side Diff Engine</div>
+            <div className="text-[10px] font-mono uppercase font-bold text-indigo-400">Agent 03</div>
+            <div className="text-xs font-bold text-white">AI Bypass & Diff</div>
+            <div className="text-[10px] text-slate-400 hidden sm:block">Side-by-Side Diff</div>
           </div>
         </button>
 
-        {/* Agent 3 Tab */}
+        {/* Agent 04: Media Marketing Tab */}
         <button
           onClick={() => setActiveAgent('marketing')}
-          className={`p-3.5 rounded-xl flex items-center gap-3 text-left transition-all duration-200 ${
+          className={`p-3 rounded-xl flex items-center gap-2.5 text-left transition-all duration-200 ${
             activeAgent === 'marketing'
               ? 'bg-gradient-to-r from-pink-500/20 to-rose-500/20 border border-pink-500/40 shadow-lg shadow-pink-500/10'
               : 'hover:bg-white/[0.04] text-slate-400 hover:text-slate-200 border border-transparent'
           }`}
         >
           <div
-            className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+            className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
               activeAgent === 'marketing'
                 ? 'bg-pink-500/30 text-pink-300'
                 : 'bg-white/5 text-slate-400'
             }`}
           >
-            <Megaphone className="w-5 h-5" />
+            <Megaphone className="w-4 h-4" />
           </div>
           <div>
-            <div className="text-[10px] font-mono uppercase font-bold text-pink-400">Agent 03</div>
-            <div className="text-xs sm:text-sm font-bold text-white">Media Marketing</div>
-            <div className="text-[11px] text-slate-400 hidden sm:block">Posts & 📅 Calendars</div>
+            <div className="text-[10px] font-mono uppercase font-bold text-pink-400">Agent 04</div>
+            <div className="text-xs font-bold text-white">Media Marketing</div>
+            <div className="text-[10px] text-slate-400 hidden sm:block">Viral Posts & Cal</div>
           </div>
         </button>
 
@@ -220,31 +249,43 @@ export default function CentralDashboard({ onSwitchToDocumentPipeline }: Central
               setActiveAgent('pipeline');
             }
           }}
-          className={`p-3.5 rounded-xl flex items-center gap-3 text-left transition-all duration-200 ${
+          className={`p-3 rounded-xl flex items-center gap-2.5 text-left transition-all duration-200 ${
             activeAgent === 'pipeline'
-              ? 'bg-gradient-to-r from-emerald-500/20 to-teal-500/20 border border-emerald-500/40 shadow-lg shadow-emerald-500/10'
+              ? 'bg-gradient-to-r from-cyan-500/20 to-teal-500/20 border border-cyan-500/40 shadow-lg shadow-cyan-500/10'
               : 'hover:bg-white/[0.04] text-slate-400 hover:text-slate-200 border border-transparent'
           }`}
         >
           <div
-            className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+            className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
               activeAgent === 'pipeline'
-                ? 'bg-emerald-500/30 text-emerald-300'
+                ? 'bg-cyan-500/30 text-cyan-300'
                 : 'bg-white/5 text-slate-400'
             }`}
           >
-            <FileText className="w-5 h-5" />
+            <FileText className="w-4 h-4" />
           </div>
           <div>
-            <div className="text-[10px] font-mono uppercase font-bold text-emerald-400">Batch Hub</div>
-            <div className="text-xs sm:text-sm font-bold text-white">Document Pipeline</div>
-            <div className="text-[11px] text-slate-400 hidden sm:block">DOCX, PDF, RTF Files</div>
+            <div className="text-[10px] font-mono uppercase font-bold text-cyan-400">Batch Hub</div>
+            <div className="text-xs font-bold text-white">Doc Pipeline</div>
+            <div className="text-[10px] text-slate-400 hidden sm:block">DOCX, PDF Files</div>
           </div>
         </button>
       </div>
 
       {/* Render Active Agent Interface */}
       <div>
+        {activeAgent === 'generator' && (
+          <GeneratorAgentView
+            onGenerated={handleItemGenerated}
+            onTransferToHumanizer={(text) => {
+              setLoadedInput(text);
+              setActiveAgent('humanizer');
+            }}
+            initialPrompt={loadedInput}
+            initialResult={loadedResult}
+          />
+        )}
+
         {activeAgent === 'humanizer' && (
           <HumanizerAgentView
             onGenerated={handleItemGenerated}

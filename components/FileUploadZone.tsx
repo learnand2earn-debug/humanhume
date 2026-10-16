@@ -12,6 +12,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { DocumentRecord } from '@/lib/types';
+import { safeFetchJson } from '@/lib/utils/safe-json';
 
 interface FileUploadZoneProps {
   onUploadSuccess: (doc: DocumentRecord) => void;
@@ -95,16 +96,16 @@ export default function FileUploadZone({ onUploadSuccess }: FileUploadZoneProps)
       formData.append('file', file);
 
       setUploadProgress(50);
-      const res = await fetch('/api/documents/upload', {
+      const { ok, data, error } = await safeFetchJson<{
+        document: DocumentRecord;
+        error?: string;
+      }>('/api/documents/upload', {
         method: 'POST',
         body: formData,
       });
 
-      setUploadProgress(85);
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to upload document');
+      if (!ok || !data || !data.document) {
+        throw new Error(data?.error || error || 'Failed to upload document');
       }
 
       setUploadProgress(100);

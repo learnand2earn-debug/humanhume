@@ -10,6 +10,7 @@ import {
   BypassDiffChunk,
 } from '@/lib/agents/types';
 import { downloadFile } from '@/lib/agents/download';
+import { safeFetchJson } from '@/lib/utils/safe-json';
 import {
   Shield,
   Copy,
@@ -69,7 +70,11 @@ export default function BypassAgentView({
         protectFactualEntities,
       };
 
-      const res = await fetch('/api/agents/generate', {
+      const { ok, data, error } = await safeFetchJson<{
+        success: boolean;
+        result: BypassResult;
+        error?: string;
+      }>('/api/agents/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -79,12 +84,11 @@ export default function BypassAgentView({
         }),
       });
 
-      const data = await res.json();
-      if (data.success && data.result) {
+      if (ok && data?.success && data?.result) {
         setResult(data.result);
         if (onGenerated) onGenerated(data.result);
       } else {
-        alert(data.error || 'Failed to transform content');
+        alert(data?.error || error || 'Failed to transform content. Please try again.');
       }
     } catch (err: any) {
       alert(`Error: ${err.message || 'Network request failed'}`);

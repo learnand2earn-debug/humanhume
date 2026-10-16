@@ -8,9 +8,9 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { agentType, input, options = {} } = body;
 
-    if (!agentType || !['humanizer', 'bypass', 'marketing'].includes(agentType)) {
+    if (!agentType || !['generator', 'humanizer', 'bypass', 'marketing'].includes(agentType)) {
       return NextResponse.json(
-        { success: false, error: 'Invalid or missing agentType. Must be humanizer, bypass, or marketing.' },
+        { success: false, error: 'Invalid or missing agentType. Must be generator, humanizer, bypass, or marketing.' },
         { status: 400 }
       );
     }
@@ -29,7 +29,10 @@ export async function POST(req: NextRequest) {
     let outputPreview = '';
     let title = `${agentType.toUpperCase()} Task`;
 
-    if (agentType === 'humanizer') {
+    if (agentType === 'generator') {
+      outputPreview = (result as any).content || '';
+      title = `${(result as any).title || options.contentType || 'Draft'} (${(result as any).wordCount || 0} words)`;
+    } else if (agentType === 'humanizer') {
       outputPreview = (result as any).text || '';
       title = `Humanized (${(result as any).wordCount || 0} words)`;
     } else if (agentType === 'bypass') {

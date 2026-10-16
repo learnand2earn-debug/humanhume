@@ -15,6 +15,7 @@ import { OmniFileGenerator } from '../omni/file-generator';
 import { OmniFileFixer } from '../omni/file-fixer';
 import { OmniImageGenerator } from '../omni/image-generator';
 import { AutonomousHumanizerEngine } from '../humanizer/engine';
+import { safeFetchJson } from '../utils/safe-json';
 
 export interface GroqChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -49,36 +50,34 @@ export class GroqAgent {
     };
 
     try {
-      const res = await fetch(this.apiUrl, {
+      const { ok, data } = await safeFetchJson<any>(this.apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${key}`,
         },
         body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(12000),
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        const text = data.choices?.[0]?.message?.content;
-        if (text) return text.trim();
+      if (ok && data?.choices?.[0]?.message?.content) {
+        return data.choices[0].message.content.trim();
       }
 
       // Fallback model attempt if primary model hits rate limit or transient error
       const fallbackPayload = { ...payload, model: this.fallbackModel };
-      const fallbackRes = await fetch(this.apiUrl, {
+      const { ok: fbOk, data: fbData } = await safeFetchJson<any>(this.apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${key}`,
         },
         body: JSON.stringify(fallbackPayload),
+        signal: AbortSignal.timeout(12000),
       });
 
-      if (fallbackRes.ok) {
-        const fbData = await fallbackRes.json();
-        const fbText = fbData.choices?.[0]?.message?.content;
-        if (fbText) return fbText.trim();
+      if (fbOk && fbData?.choices?.[0]?.message?.content) {
+        return fbData.choices[0].message.content.trim();
       }
     } catch (err) {
       console.warn('Groq live LLM dispatch failed:', err);

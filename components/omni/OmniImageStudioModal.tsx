@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { TopImageModelId, GeneratedImageMeta } from '@/lib/omni/types';
 import { TOP_IMAGE_MODELS } from '@/lib/omni/image-generator';
+import { safeFetchJson } from '@/lib/utils/safe-json';
 
 interface OmniImageStudioModalProps {
   isOpen: boolean;

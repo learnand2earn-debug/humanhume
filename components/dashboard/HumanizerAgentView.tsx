@@ -9,6 +9,7 @@ import {
   VocabularyStyle,
 } from '@/lib/agents/types';
 import { downloadFile } from '@/lib/agents/download';
+import { safeFetchJson } from '@/lib/utils/safe-json';
 import {
   Sparkles,
   Copy,
@@ -52,6 +53,37 @@ export default function HumanizerAgentView({
   const [vocabulary, setVocabulary] = useState<VocabularyStyle>('rich');
   const [preserveCitations, setPreserveCitations] = useState(true);
 
+  // Quick Generator State
+  const [showQuickGen, setShowQuickGen] = useState(false);
+  const [quickGenTopic, setQuickGenTopic] = useState('');
+  const [isQuickGenerating, setIsQuickGenerating] = useState(false);
+
+  const handleQuickGenerate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickGenTopic.trim()) return;
+    setIsQuickGenerating(true);
+    try {
+      const { ok, data } = await safeFetchJson<{ success: boolean; result: any }>('/api/agents/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agentType: 'generator',
+          input: quickGenTopic,
+          options: { contentType: 'article', length: 'medium', tone: 'informative', autoHumanize: false },
+        }),
+      });
+      if (ok && data?.success && data.result?.content) {
+        setInputText(data.result.content);
+        setShowQuickGen(false);
+        setQuickGenTopic('');
+      }
+    } catch {
+      // Ignore
+    } finally {
+      setIsQuickGenerating(false);
+    }
+  };
+
   // Stats
   const wordCount = inputText.trim() ? inputText.trim().split(/\s+/).length : 0;
   const charCount = inputText.length;
@@ -68,7 +100,11 @@ export default function HumanizerAgentView({
         preserveCitations,
       };
 
-      const res = await fetch('/api/agents/generate', {
+      const { ok, data, error } = await safeFetchJson<{
+        success: boolean;
+        result: HumanizerResult;
+        error?: string;
+      }>('/api/agents/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -78,12 +114,11 @@ export default function HumanizerAgentView({
         }),
       });
 
-      const data = await res.json();
-      if (data.success && data.result) {
+      if (ok && data?.success && data?.result) {
         setResult(data.result);
         if (onGenerated) onGenerated(data.result);
       } else {
-        alert(data.error || 'Failed to humanize text');
+        alert(data?.error || error || 'Failed to humanize text. Please try again.');
       }
     } catch (err: any) {
       alert(`Error: ${err.message || 'Network request failed'}`);
@@ -258,6 +293,14 @@ export default function HumanizerAgentView({
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
+                  onClick={() => setShowQuickGen(!showQuickGen)}
+                  className="px-2.5 py-1 rounded-lg text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20 border border-emerald-500/40 flex items-center gap-1 transition-all"
+                >
+                  <Sparkles className="w-3 h-3 text-emerald-400" />
+                  <span>AI Generator</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => setInputText(SAMPLE_AI_TEXT)}
                   className="px-2.5 py-1 rounded-lg text-xs font-medium text-cyan-300 hover:bg-cyan-500/10 border border-cyan-500/20 transition-colors"
                 >
@@ -282,6 +325,40 @@ export default function HumanizerAgentView({
                 )}
               </div>
             </div>
+
+            {showQuickGen && (
+              <form onSubmit={handleQuickGenerate} className="mb-3 p-3 rounded-xl bg-emerald-950/30 border border-emerald-500/30 space-y-2">
+                <div className="text-[11px] font-bold text-emerald-300 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    Instant AI Draft Generator
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickGen(false)}
+                    className="text-slate-400 hover:text-white text-xs"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={quickGenTopic}
+                    onChange={(e) => setQuickGenTopic(e.target.value)}
+                    placeholder="Enter topic: e.g. Impact of AI on modern journalism..."
+                    className="flex-1 bg-[#050b18] border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-400"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isQuickGenerating || !quickGenTopic.trim()}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-bold text-xs flex items-center gap-1 transition-all"
+                  >
+                    {isQuickGenerating ? 'Generating...' : 'Generate'}
+                  </button>
+                </div>
+              </form>
+            )}
 
             <textarea
               value={inputText}

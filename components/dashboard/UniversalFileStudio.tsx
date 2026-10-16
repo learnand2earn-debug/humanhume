@@ -24,6 +24,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { GeneratedFileResponse } from '@/lib/omni/file-generator';
+import { safeFetchJson } from '@/lib/utils/safe-json';
 
 interface FormatOption {
   ext: string;
@@ -114,7 +115,11 @@ export default function UniversalFileStudio() {
     try {
       setGenerationStep(`Authoring comprehensive .${activeExt.toUpperCase()} content...`);
 
-      const res = await fetch('/api/omni/generate-file', {
+      const { ok, data, error } = await safeFetchJson<{
+        success: boolean;
+        file: GeneratedFileResponse;
+        content: string;
+      }>('/api/omni/generate-file', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -125,13 +130,11 @@ export default function UniversalFileStudio() {
         }),
       });
 
-      if (!res.ok) {
-        const errorJson = await res.json().catch(() => null);
-        throw new Error(errorJson?.error || `Generation failed (HTTP ${res.status})`);
+      if (!ok || !data) {
+        throw new Error(error || 'Generation failed. Server might be warming up.');
       }
 
       setGenerationStep('Compiling native binary structure & caching...');
-      const data = await res.json();
 
       if (data.file) {
         setCurrentResult(data.file);

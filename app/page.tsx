@@ -13,6 +13,7 @@ import CentralDashboard from '@/components/dashboard/CentralDashboard';
 import UniversalFileStudio from '@/components/dashboard/UniversalFileStudio';
 
 import { DocumentDiff, DocumentRecord, DocumentVersion, JobStatus } from '@/lib/types';
+import { safeFetchJson } from '@/lib/utils/safe-json';
 import {
   Sparkles,
   ShieldCheck,
@@ -100,15 +101,14 @@ export default function HomePage() {
       if (!res.ok) {
         let errMsg = `Server returned status ${res.status}`;
         try {
-          const contentType = res.headers.get('content-type') || '';
-          if (contentType.includes('application/json')) {
-            const errJson = await res.json();
-            errMsg = errJson.error || errMsg;
-          } else {
-            const rawText = await res.text();
-            if (rawText.toLowerCase().includes('upstream error')) {
-              errMsg = 'Server is currently warming up or reconnecting. Please retry in a few moments.';
-            } else if (rawText) {
+          const rawText = await res.text();
+          if (rawText.toLowerCase().includes('upstream error') || rawText.toLowerCase().includes('bad gateway')) {
+            errMsg = 'Server is currently warming up or reconnecting. Please retry in a few moments.';
+          } else if (rawText) {
+            try {
+              const errJson = JSON.parse(rawText);
+              errMsg = errJson.error || errJson.message || errMsg;
+            } catch {
               errMsg = rawText.slice(0, 200);
             }
           }
@@ -278,8 +278,8 @@ export default function HomePage() {
     try {
       const res = await fetch(`/api/documents/${docId}/retry`, { method: 'POST' });
       if (res.ok) {
-        const docRes = await fetch(`/api/documents/${docId}`).then((r) => r.json());
-        if (docRes.document) {
+        const { ok, data: docRes } = await safeFetchJson<{ document: DocumentRecord }>(`/api/documents/${docId}`);
+        if (ok && docRes?.document) {
           setActiveDocument(docRes.document);
         }
         setPipelineFinished(false);
@@ -294,19 +294,21 @@ export default function HomePage() {
   const handleBridgeToWorkspace = async (doc: DocumentRecord) => {
     setBridgingStatus(`Loading ${doc.originalName} into AI Workspace...`);
     try {
-      const res = await fetch('/api/workspace/bridge', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          documentId: doc.id,
-          originalName: doc.originalName,
-        }),
-      });
-      const data = await res.json();
-      if (data.success && data.conversationId) {
+      const { ok, data, error } = await safeFetchJson<{ success: boolean; conversationId?: string; error?: string }>(
+        '/api/workspace/bridge',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            documentId: doc.id,
+            originalName: doc.originalName,
+          }),
+        }
+      );
+      if (ok && data?.success && data.conversationId) {
         router.push(`/workspace?id=${data.conversationId}`);
       } else {
-        alert(data.error || 'Failed to initialize workspace task');
+        alert(data?.error || error || 'Failed to initialize workspace task');
       }
     } catch (err: any) {
       alert(`Network error: ${err.message}`);
@@ -319,19 +321,21 @@ export default function HomePage() {
     setBridgingStatus(`Exporting ${doc.originalName} to Legal Studio...`);
     try {
       const textToExport = diffData?.humanizedText || diffData?.originalText || '';
-      const res = await fetch('/api/documentation/bridge', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: doc.originalName.replace(/\.[^/.]+$/, ''),
-          text: textToExport || `Document Content: ${doc.originalName}`,
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
+      const { ok, data, error } = await safeFetchJson<{ success: boolean; error?: string }>(
+        '/api/documentation/bridge',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: doc.originalName.replace(/\.[^/.]+$/, ''),
+            text: textToExport || `Document Content: ${doc.originalName}`,
+          }),
+        }
+      );
+      if (ok && data?.success) {
         router.push('/documentation');
       } else {
-        alert(data.error || 'Failed to export to legal studio');
+        alert(data?.error || error || 'Failed to export to legal studio');
       }
     } catch (err: any) {
       alert(`Network error: ${err.message}`);
@@ -345,20 +349,24 @@ export default function HomePage() {
     if (!quickPrompt.trim()) return;
     setBridgingStatus('Initializing Autonomous AI Task...');
     try {
-      const res = await fetch('/api/workspace/conversations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: quickPrompt.slice(0, 45).trim() }),
-      });
-      const data = await res.json();
-      if (data.success && data.conversation) {
+      const { ok, data, error } = await safeFetchJson<{ success: boolean; conversation?: { id: string }; error?: string }>(
+        '/api/workspace/conversations',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: quickPrompt.slice(0, 45).trim() }),
+        }
+      );
+      if (ok && data?.success && data.conversation) {
         // Send initial user message
-        await fetch(`/api/workspace/conversations/${data.conversation.id}/messages`, {
+        await safeFetchJson(`/api/workspace/conversations/${data.conversation.id}/messages`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ prompt: quickPrompt }),
         });
         router.push(`/workspace?id=${data.conversation.id}`);
+      } else {
+        alert(data?.error || error || 'Failed to start quick task');
       }
     } catch (err: any) {
       alert(`Failed: ${err.message}`);
@@ -633,7 +641,7 @@ export default function HomePage() {
                 }`}
               >
                 <Zap className="w-4 h-4 text-emerald-300" />
-                <span>Specialist Agent Trio</span>
+                <span>AI Generator &amp; Humanizer Suite</span>
               </button>
 
               <button
@@ -824,11 +832,12 @@ export default function HomePage() {
                         documentId={activeDocument.id}
                         versions={versions}
                         onSelectVersion={async (verId) => {
-                          const diffRes = await fetch(
+                          const { ok, data: diffJson } = await safeFetchJson(
                             `/api/documents/${activeDocument.id}/diff?versionId=${verId}`
                           );
-                          const diffJson = await diffRes.json();
-                          setDiffData(diffJson);
+                          if (ok && diffJson) {
+                            setDiffData(diffJson);
+                          }
                         }}
                       />
                     )}

@@ -26,6 +26,7 @@ import {
   Sliders,
 } from 'lucide-react';
 import { AdminSettings, DocumentRecord, ProcessingJob, SystemLog } from '@/lib/types';
+import { safeFetchJson } from '@/lib/utils/safe-json';
 import AdminLegalKnowledgeBaseView from './dashboard/AdminLegalKnowledgeBaseView';
 import AdminLegalSettingsView from './dashboard/AdminLegalSettingsView';
 
@@ -70,27 +71,30 @@ export default function AdminDashboard() {
   const loadAll = async () => {
     try {
       const [statsRes, jobsRes, settingsRes, logsRes] = await Promise.all([
-        fetch('/api/admin/stats').then((r) => r.json()),
-        fetch('/api/admin/jobs').then((r) => r.json()),
-        fetch('/api/admin/settings').then((r) => r.json()),
-        fetch('/api/admin/logs?limit=50').then((r) => r.json()),
+        safeFetchJson('/api/admin/stats'),
+        safeFetchJson('/api/admin/jobs'),
+        safeFetchJson('/api/admin/settings'),
+        safeFetchJson('/api/admin/logs?limit=50'),
       ]);
 
-      setStats(statsRes);
-      setJobs(jobsRes.jobs || []);
-      setDocuments(jobsRes.documents || []);
-      setSettings(settingsRes.settings);
-      setLogs(logsRes.logs || []);
-
-      if (settingsRes.settings) {
-        setFormHumanizerUrl(settingsRes.settings.humanizer?.apiUrl || '');
-        setFormHumanizerKey(settingsRes.settings.humanizer?.apiKey || '');
-        setFormHumanizerModel(settingsRes.settings.humanizer?.model || '');
-        setFormCheckerUrl(settingsRes.settings.checker?.apiUrl || '');
-        setFormCheckerKey(settingsRes.settings.checker?.apiKey || '');
-        setFormMaxRetries(settingsRes.settings.maxRetries || 3);
-        setFormMode(settingsRes.settings.mode || 'demo');
-        setFormDiscordWebhook(settingsRes.settings.discordWebhookUrl || '');
+      if (statsRes.ok && statsRes.data) setStats(statsRes.data);
+      if (jobsRes.ok && jobsRes.data) {
+        setJobs(jobsRes.data.jobs || []);
+        setDocuments(jobsRes.data.documents || []);
+      }
+      if (settingsRes.ok && settingsRes.data) {
+        setSettings(settingsRes.data.settings);
+        const s = settingsRes.data.settings;
+        if (s) {
+          setFormHumanizerUrl(s.humanizer?.apiUrl || '');
+          setFormHumanizerKey(s.humanizer?.apiKey || '');
+          setFormHumanizerModel(s.humanizer?.model || '');
+          setFormCheckerUrl(s.checker?.apiUrl || '');
+          setFormCheckerKey(s.checker?.apiKey || '');
+          setFormMaxRetries(s.maxRetries || 3);
+          setFormMode(s.mode || 'demo');
+          setFormDiscordWebhook(s.discordWebhookUrl || '');
+        }
       }
     } catch (err) {
       console.error('Failed to load admin data:', err);
@@ -124,17 +128,18 @@ export default function AdminDashboard() {
         },
       };
 
-      const res = await fetch('/api/admin/settings', {
+      const { ok, data, error } = await safeFetchJson<{ settings: AdminSettings }>('/api/admin/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
 
-      if (!res.ok) throw new Error('Save failed');
-      const data = await res.json();
-      setSettings(data.settings);
-      setSaveStatus('Configuration successfully saved and applied.');
-      setTimeout(() => setSaveStatus(null), 3000);
+      if (!ok) throw new Error(error || 'Save failed');
+      if (data?.settings) {
+        setSettings(data.settings);
+        setSaveStatus('Configuration successfully saved and applied.');
+        setTimeout(() => setSaveStatus(null), 3000);
+      }
     } catch (err: unknown) {
       setSaveStatus(`Failed to save: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -143,7 +148,7 @@ export default function AdminDashboard() {
   const testHumanizerApi = async () => {
     setHumanizerTestResult({ loading: true });
     try {
-      const res = await fetch('/api/admin/test-humanizer', {
+      const { ok, data, error } = await safeFetchJson<any>('/api/admin/test-humanizer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -152,12 +157,11 @@ export default function AdminDashboard() {
           model: formHumanizerModel,
         }),
       });
-      const data = await res.json();
       setHumanizerTestResult({
         loading: false,
-        success: data.success,
-        latencyMs: data.latencyMs,
-        message: data.message,
+        success: Boolean(ok && data?.success),
+        latencyMs: data?.latencyMs,
+        message: data?.message || error || 'Test completed',
       });
     } catch (err: unknown) {
       setHumanizerTestResult({
@@ -171,13 +175,12 @@ export default function AdminDashboard() {
   const testCheckerApi = async () => {
     setCheckerTestResult({ loading: true });
     try {
-      const res = await fetch('/api/admin/test-checker', { method: 'POST' });
-      const data = await res.json();
+      const { ok, data, error } = await safeFetchJson<any>('/api/admin/test-checker', { method: 'POST' });
       setCheckerTestResult({
         loading: false,
-        success: data.success,
-        latencyMs: data.latencyMs,
-        message: data.message,
+        success: Boolean(ok && data?.success),
+        latencyMs: data?.latencyMs,
+        message: data?.message || error || 'Test completed',
       });
     } catch (err: unknown) {
       setCheckerTestResult({

@@ -43,10 +43,16 @@ export default function AgentHistoryDrawer({
 
   const getAgentBadge = (type: AgentType) => {
     switch (type) {
-      case 'humanizer':
+      case 'generator':
         return (
           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
-            <Sparkles className="w-2.5 h-2.5 text-cyan-400" /> Humanizer
+            <Sparkles className="w-2.5 h-2.5 text-cyan-400" /> Generator
+          </span>
+        );
+      case 'humanizer':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+            <Sparkles className="w-2.5 h-2.5 text-emerald-400" /> Humanizer
           </span>
         );
       case 'bypass':
@@ -66,7 +72,9 @@ export default function AgentHistoryDrawer({
 
   const handleCopy = (item: AgentHistoryItem) => {
     let text = '';
-    if (item.agentType === 'humanizer') {
+    if (item.agentType === 'generator') {
+      text = (item.data as any).content || (item.data as any).humanizedContent || '';
+    } else if (item.agentType === 'humanizer') {
       text = (item.data as any).text || '';
     } else if (item.agentType === 'bypass') {
       text = (item.data as any).transformedText || '';
@@ -104,7 +112,7 @@ export default function AgentHistoryDrawer({
           {/* Filter Pills */}
           <div className="px-5 py-3 border-b border-white/[0.06] flex items-center justify-between gap-2 overflow-x-auto">
             <div className="flex items-center gap-1.5 text-xs">
-              {(['all', 'humanizer', 'bypass', 'marketing'] as const).map((t) => (
+              {(['all', 'generator', 'humanizer', 'bypass', 'marketing'] as const).map((t) => (
                 <button
                   key={t}
                   onClick={() => setFilter(t)}

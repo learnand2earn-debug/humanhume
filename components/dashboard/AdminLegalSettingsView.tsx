@@ -13,6 +13,7 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { DocumentationSettings, LegalAnalytics, LegalAuditLog } from '@/lib/legal/types';
+import { safeFetchJson } from '@/lib/utils/safe-json';
 
 export default function AdminLegalSettingsView() {
   const [analytics, setAnalytics] = useState<LegalAnalytics | null>(null);
@@ -33,24 +34,25 @@ export default function AdminLegalSettingsView() {
   const loadData = async () => {
     try {
       const [setRes, anaRes, logsRes] = await Promise.all([
-        fetch('/api/documentation/settings').then((r) => r.json()),
-        fetch('/api/documentation/analytics').then((r) => r.json()),
-        fetch('/api/documentation/audit-logs?limit=50').then((r) => r.json()),
+        safeFetchJson<any>('/api/documentation/settings'),
+        safeFetchJson<any>('/api/documentation/analytics'),
+        safeFetchJson<any>('/api/documentation/audit-logs?limit=50'),
       ]);
 
-      if (setRes.settings) {
-        setMaxAttempts(setRes.settings.maxAutomaticAttempts || 3);
-        setDisclaimerText(setRes.settings.legalDisclaimer || '');
-        setDisclaimerEnabled(setRes.settings.disclaimerEnabled !== false);
-        setDefaultJurisdiction(setRes.settings.defaultJurisdiction || 'United States');
-        setIntensity(setRes.settings.defaultHumanizationIntensity || 'CONSERVATIVE');
-        setProtectionLevel(setRes.settings.legalClauseProtection || 'HIGH');
-        setRequireApproval(setRes.settings.requiredAdminApproval !== false);
-        setRetentionDays(setRes.settings.documentRetentionDays || 90);
+      if (setRes.ok && setRes.data?.settings) {
+        const s = setRes.data.settings;
+        setMaxAttempts(s.maxAutomaticAttempts || 3);
+        setDisclaimerText(s.legalDisclaimer || '');
+        setDisclaimerEnabled(s.disclaimerEnabled !== false);
+        setDefaultJurisdiction(s.defaultJurisdiction || 'United States');
+        setIntensity(s.defaultHumanizationIntensity || 'CONSERVATIVE');
+        setProtectionLevel(s.legalClauseProtection || 'HIGH');
+        setRequireApproval(s.requiredAdminApproval !== false);
+        setRetentionDays(s.documentRetentionDays || 90);
       }
 
-      if (anaRes.analytics) setAnalytics(anaRes.analytics);
-      if (logsRes.logs) setAuditLogs(logsRes.logs);
+      if (anaRes.ok && anaRes.data?.analytics) setAnalytics(anaRes.data.analytics);
+      if (logsRes.ok && logsRes.data?.logs) setAuditLogs(logsRes.data.logs);
     } catch (err) {
       console.error('Failed to load legal settings & analytics:', err);
     }

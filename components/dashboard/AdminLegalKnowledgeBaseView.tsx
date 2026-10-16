@@ -23,6 +23,7 @@ import {
   KnowledgeStatus,
   LegalKnowledgeBaseEntry,
 } from '@/lib/legal/types';
+import { safeFetchJson } from '@/lib/utils/safe-json';
 
 export default function AdminLegalKnowledgeBaseView() {
   const [entries, setEntries] = useState<LegalKnowledgeBaseEntry[]>([]);
@@ -55,12 +56,12 @@ export default function AdminLegalKnowledgeBaseView() {
     setIsLoading(true);
     try {
       const [kbRes, confRes] = await Promise.all([
-        fetch('/api/documentation/knowledge').then((r) => r.json()),
-        fetch('/api/documentation/knowledge/conflicts').then((r) => r.json()),
+        safeFetchJson<any>('/api/documentation/knowledge'),
+        safeFetchJson<any>('/api/documentation/knowledge/conflicts'),
       ]);
 
-      if (kbRes.entries) setEntries(kbRes.entries);
-      if (confRes.conflicts) setConflicts(confRes.conflicts);
+      if (kbRes.ok && kbRes.data?.entries) setEntries(kbRes.data.entries);
+      if (confRes.ok && confRes.data?.conflicts) setConflicts(confRes.data.conflicts);
       setIsLoading(false);
     } catch (err) {
       console.error('Failed to load KB data:', err);
@@ -129,15 +130,14 @@ export default function AdminLegalKnowledgeBaseView() {
       const fd = new FormData();
       fd.append('file', importFile);
 
-      const res = await fetch('/api/documentation/knowledge/import', {
+      const { ok, data, error } = await safeFetchJson<any>('/api/documentation/knowledge/import', {
         method: 'POST',
         body: fd,
       });
-      const data = await res.json();
       setImporting(false);
 
-      if (data.success) {
-        setImportMessage(data.message);
+      if (ok && data?.success) {
+        setImportMessage(data.message || 'Import successful');
         setImportFile(null);
         loadData();
         setTimeout(() => {
@@ -145,7 +145,7 @@ export default function AdminLegalKnowledgeBaseView() {
           setImportMessage(null);
         }, 1500);
       } else {
-        setImportMessage(`Error: ${data.error}`);
+        setImportMessage(`Error: ${data?.error || error || 'Import failed'}`);
       }
     } catch (err) {
       setImporting(false);
