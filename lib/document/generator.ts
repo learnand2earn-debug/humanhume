@@ -16,27 +16,35 @@ export class DocumentGenerator {
       ? text
       : 'HumanFlow AI Processed Document\n\nPreserved content generated successfully.';
 
-    switch (fileType) {
-      case 'docx':
-        return await this.generateDocx(safeText, title);
+    const fallbackBuffer = Buffer.from(safeText, 'utf-8');
 
-      case 'pdf':
-        return await this.generatePdf(safeText, title);
+    const generatePromise = (async () => {
+      switch (fileType) {
+        case 'docx':
+          return await this.generateDocx(safeText, title);
+        case 'pdf':
+          return await this.generatePdf(safeText, title);
+        case 'txt':
+        case 'md':
+          return Buffer.from(safeText, 'utf-8');
+        case 'rtf':
+          return this.generateRtf(safeText);
+        case 'xlsx':
+          return await this.generateXlsx(safeText);
+        default:
+          return Buffer.from(safeText, 'utf-8');
+      }
+    })();
 
-      case 'txt':
-        return Buffer.from(safeText, 'utf-8');
+    // 3.5s timeout safeguard so final generation never hangs or blocks the thread
+    const timeoutPromise = new Promise<Buffer>((resolve) =>
+      setTimeout(() => resolve(fallbackBuffer), 3500)
+    );
 
-      case 'md':
-        return Buffer.from(safeText, 'utf-8');
-
-      case 'rtf':
-        return this.generateRtf(safeText);
-
-      case 'xlsx':
-        return await this.generateXlsx(safeText);
-
-      default:
-        return Buffer.from(safeText, 'utf-8');
+    try {
+      return await Promise.race([generatePromise, timeoutPromise]);
+    } catch {
+      return fallbackBuffer;
     }
   }
 

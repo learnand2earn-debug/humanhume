@@ -15,7 +15,10 @@ export class DiffEngine {
       aiCheckScore?: number;
     }
   ): DocumentDiff {
-    const rawDiff = Diff.diffWordsWithSpace(originalText, humanizedText);
+    const isLarge = (originalText.length + humanizedText.length) > 12000;
+    const rawDiff = isLarge
+      ? Diff.diffLines(originalText, humanizedText)
+      : Diff.diffWordsWithSpace(originalText, humanizedText);
     const chunks: DiffChunk[] = [];
 
     let addedCount = 0;

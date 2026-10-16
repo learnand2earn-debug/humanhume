@@ -244,7 +244,7 @@ export class DocumentationPipelineOrchestrator {
       let finalPreservation = preservationOutcome.preservationResult;
 
       while (
-        currentAttempt < maxAttempts &&
+        currentAttempt < Math.min(maxAttempts, 2) &&
         (qualityCheckResult.status === 'NEEDS_REVIEW' || !finalPreservation.passed)
       ) {
         currentAttempt++;

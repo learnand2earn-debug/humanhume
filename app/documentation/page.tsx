@@ -197,10 +197,13 @@ export default function DocumentationStudioPage() {
         } else if (p < 90) {
           setGenerationStep('Legal Quality Checker & Preservation Agent verifying contractual covenants...');
           return p + 5;
+        } else if (p < 97) {
+          setGenerationStep('Final Document Generation compiling preserved output copy...');
+          return p + 2;
         }
         return p;
       });
-    }, 450);
+    }, 280);
 
     try {
       const res = await fetch('/api/documentation/generate', {
@@ -217,7 +220,7 @@ export default function DocumentationStudioPage() {
 
       clearInterval(pInterval);
       setPipelineProgress(100);
-      setGenerationStep('Final Document generated & Discord notification dispatched!');
+      setGenerationStep('Final Document generated & compiled successfully!');
 
       const data = await res.json();
       if (!res.ok || !data.success) {
@@ -235,7 +238,7 @@ export default function DocumentationStudioPage() {
       setTimeout(() => {
         setIsGenerating(false);
         setActiveTab('editor');
-      }, 800);
+      }, 300);
     } catch (err: unknown) {
       clearInterval(pInterval);
       setIsGenerating(false);

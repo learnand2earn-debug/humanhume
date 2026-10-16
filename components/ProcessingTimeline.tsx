@@ -100,7 +100,7 @@ export default function ProcessingTimeline({
         const res = await fetch(`/api/documents/${documentId}/status`);
         if (!res.ok) {
           if (isMounted) {
-            timer = setTimeout(fetchStatus, 2500);
+            timer = setTimeout(fetchStatus, 1200);
           }
           return;
         }
@@ -108,7 +108,7 @@ export default function ProcessingTimeline({
         const rawText = await res.text();
         if (!rawText || rawText.includes('upstream error')) {
           if (isMounted) {
-            timer = setTimeout(fetchStatus, 2500);
+            timer = setTimeout(fetchStatus, 1200);
           }
           return;
         }
@@ -118,7 +118,7 @@ export default function ProcessingTimeline({
           json = JSON.parse(rawText);
         } catch {
           if (isMounted) {
-            timer = setTimeout(fetchStatus, 2500);
+            timer = setTimeout(fetchStatus, 1200);
           }
           return;
         }
@@ -137,11 +137,11 @@ export default function ProcessingTimeline({
             return;
           }
 
-          timer = setTimeout(fetchStatus, 1500);
+          timer = setTimeout(fetchStatus, 800);
         }
       } catch {
         if (isMounted) {
-          timer = setTimeout(fetchStatus, 3000);
+          timer = setTimeout(fetchStatus, 1500);
         }
       }
     };

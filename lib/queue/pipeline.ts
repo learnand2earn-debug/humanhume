@@ -379,8 +379,8 @@ export class PipelineOrchestrator {
 
       updateStep(finalStatus, 100, statusDetails);
 
-      // 8. DISCORD NOTIFICATION (Section 18)
-      await DiscordNotifier.notify({
+      // 8. DISCORD NOTIFICATION (Section 18) - Fire and forget
+      void DiscordNotifier.notify({
         event: finalStatus === 'COMPLETED' ? 'processing_completed' : 'processing_failed',
         fileName: doc.originalName,
         status: finalStatus,
@@ -389,7 +389,7 @@ export class PipelineOrchestrator {
         aiScore: latestQualityCheck?.score ?? 8,
         durationMs: Date.now() - startTime,
         retries: retryCount,
-      });
+      }).catch(() => {});
 
       return updatedDoc;
     } catch (pipelineErr: unknown) {
@@ -414,14 +414,14 @@ export class PipelineOrchestrator {
         message: `Pipeline encountered unrecoverable error: ${errMsg}`,
       });
 
-      await DiscordNotifier.notify({
+      void DiscordNotifier.notify({
         event: 'processing_failed',
         fileName: doc.originalName,
         status: 'FAILED',
         traceId: doc.traceId,
         errorMessage: errMsg,
         durationMs: Date.now() - startTime,
-      });
+      }).catch(() => {});
 
       throw pipelineErr;
     }

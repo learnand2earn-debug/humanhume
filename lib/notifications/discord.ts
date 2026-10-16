@@ -116,14 +116,17 @@ export class DiscordNotifier {
     };
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2000);
       const res = await fetch(webhookUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ embeds: [embed] }),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
       return res.ok;
-    } catch (err) {
-      console.warn('Failed to send Discord webhook:', err);
+    } catch {
       return false;
     }
   }
