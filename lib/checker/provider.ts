@@ -8,14 +8,21 @@ export class CheckerProvider {
    */
   static async check(request: CheckerRequest): Promise<CheckerResult> {
     const settings = repository.getSettings();
+    const rawKey = settings.checker.apiKey?.trim() || '';
+    const isDummyKey =
+      !rawKey ||
+      rawKey.includes('1234567890') ||
+      rawKey.startsWith('sk-test') ||
+      rawKey === '******';
+
     const isLive =
-      settings.mode === 'live' && settings.checker.apiUrl && settings.checker.apiKey;
+      settings.mode === 'live' && settings.checker.apiUrl && !isDummyKey;
 
     const startTime = Date.now();
 
     if (isLive) {
       try {
-        const timeoutMs = settings.checker.timeoutMs || 30000;
+        const timeoutMs = Math.min(settings.checker.timeoutMs || 4000, 4000);
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -23,7 +30,7 @@ export class CheckerProvider {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${settings.checker.apiKey}`,
+            Authorization: `Bearer ${rawKey}`,
           },
           body: JSON.stringify({
             text: request.text,

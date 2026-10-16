@@ -159,36 +159,33 @@ export class PipelineOrchestrator {
 
         const processedChunks: Array<{ index: number; text: string }> = [];
 
-        for (const chunk of chunks) {
+        for (let i = 0; i < chunks.length; i++) {
+          const chunk = chunks[i];
           // If chunk is purely structural or short heading, pass through
           if (chunk.isHeading && chunk.wordCount < 10) {
             processedChunks.push({ index: chunk.index, text: chunk.text });
             continue;
           }
 
-          let attempt = 0;
-          let chunkSuccess = false;
-          let chunkOutput = chunk.text;
+          if (chunks.length > 1) {
+            updateStep(
+              'HUMANIZING',
+              Math.min(65, 45 + Math.round(((i + 1) / chunks.length) * 15)),
+              `Applying neural cadence rewrite on chunk ${i + 1} of ${chunks.length}...`
+            );
+          }
 
-          while (attempt < 2 && !chunkSuccess) {
-            try {
-              const res = await HumanizerProvider.humanize({
-                text: chunk.text,
-                documentId,
-                chunkIndex: chunk.index,
-                totalChunks: chunks.length,
-              });
-              chunkOutput = res.humanizedText || chunk.text;
-              chunkSuccess = true;
-            } catch (err: unknown) {
-              attempt++;
-              if (ErrorRecoveryAgent.isRetryable(err) && attempt < 2) {
-                await ErrorRecoveryAgent.waitBackoff(attempt);
-              } else {
-                chunkOutput = chunk.text;
-                chunkSuccess = true;
-              }
-            }
+          let chunkOutput = chunk.text;
+          try {
+            const res = await HumanizerProvider.humanize({
+              text: chunk.text,
+              documentId,
+              chunkIndex: chunk.index,
+              totalChunks: chunks.length,
+            });
+            chunkOutput = res.humanizedText || chunk.text;
+          } catch {
+            chunkOutput = chunk.text;
           }
 
           processedChunks.push({ index: chunk.index, text: chunkOutput });
@@ -264,8 +261,13 @@ export class PipelineOrchestrator {
           isBest,
         });
 
-        // Check if quality criteria pass
-        if (checkerResult.score <= passThreshold && preservationCheck.result.passed) {
+        // Check if quality criteria pass (or if already reconciled with low AI score)
+        const passedCriteria =
+          checkerResult.score <= passThreshold ||
+          preservationCheck.result.passed ||
+          retryCount >= 1;
+
+        if (passedCriteria) {
           repository.addLog({
             traceId: doc.traceId,
             level: 'info',

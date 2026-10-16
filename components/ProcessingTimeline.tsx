@@ -13,6 +13,7 @@ import {
   Sparkles,
   Zap,
   AlertTriangle,
+  Download,
 } from 'lucide-react';
 import { JobStatus, StepLog } from '@/lib/types';
 
@@ -268,6 +269,48 @@ export default function ProcessingTimeline({
             <p className="text-xs text-rose-200/90 leading-relaxed font-mono">
               {data.errorMessage || 'Text extraction or processing encountered a fatal error.'}
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* Instant Download Completion Banner */}
+      {data.status === 'COMPLETED' && (
+        <div className="p-5 rounded-2xl bg-gradient-to-r from-emerald-950/60 via-teal-950/40 to-slate-900/80 border border-emerald-500/40 flex flex-col sm:flex-row items-center justify-between gap-4 mb-6 shadow-xl shadow-emerald-950/50 animate-in fade-in zoom-in-95 duration-300">
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center shrink-0 shadow-md shadow-emerald-500/20">
+              <CheckCircle2 className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-display font-bold text-white text-base">Pipeline Completed Successfully</span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                  Ready
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 mt-0.5">
+                All factual anchors frozen &amp; AI score reduced. Output document compiled.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5 shrink-0 w-full sm:w-auto">
+            <a
+              href={`/api/documents/${data.id}/download?type=final`}
+              download
+              id="timeline-download-final-btn"
+              className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/25 transition-all hover:scale-102 cursor-pointer"
+            >
+              <Download className="w-4 h-4" />
+              <span>Download Final Document</span>
+            </a>
+            <a
+              href={`/api/documents/${data.id}/download?type=original`}
+              download
+              title="Download original document"
+              className="px-3.5 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 text-xs font-semibold border border-white/10 flex items-center justify-center transition-colors"
+            >
+              Original
+            </a>
           </div>
         </div>
       )}

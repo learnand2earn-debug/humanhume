@@ -225,6 +225,7 @@ export default function HomePage() {
   const handlePipelineFinished = async (status: JobStatus) => {
     loadPlatformData();
     if (activeDocument) {
+      setActiveDocument((prev) => (prev ? { ...prev, status } : prev));
       try {
         const docRes = await fetch(`/api/documents/${activeDocument.id}`).then(async (r) => (r.ok ? r.json() : null)).catch(() => null);
         if (docRes?.document) {
