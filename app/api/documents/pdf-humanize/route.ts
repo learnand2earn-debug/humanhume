@@ -110,77 +110,47 @@ export async function POST(req: NextRequest) {
       totalPages: 0, // Will be updated after extraction
     });
 
-    // For small PDFs or sync mode, process inline (< 800KB or explicit sync)
-    if (syncMode || pdfBuffer.length < 800 * 1024) {
-      const job = await runPdfHumanizationPipeline({
-        jobId,
-        traceId,
-        fileName,
-        pdfBuffer,
-        intensity,
-      });
-
-      if (job.status === 'FAILED') {
-        return NextResponse.json(
-          {
-            error: job.errorMessage || 'PDF humanization failed.',
-            jobId,
-            traceId,
-          },
-          {status: 422}
-        );
-      }
-
-      // Return job status + download URL (PDF stored in job, fetched via [jobId]/download)
-      return NextResponse.json({
-        success: true,
-        jobId,
-        traceId,
-        status: job.status,
-        totalPages: job.totalPages,
-        processedPages: job.processedPages,
-        failedPages: job.failedPages,
-        progressPercent: job.progressPercent,
-        downloadUrl: `/api/documents/pdf-humanize/${jobId}/download`,
-        completedAt: job.completedAt,
-        pageResults: job.pageResults.map((r) => ({
-          pageNumber: r.pageNumber,
-          status: r.status,
-          imageCount: r.imageCount,
-          errorReason: r.errorReason,
-          retryCount: r.retryCount,
-          durationMs: r.durationMs,
-        })),
-      });
-    }
-
-    // For larger PDFs, start async pipeline and return job ID for polling
-    // (Next.js 15 App Router does not support background jobs natively,
-    // so we run it in a non-blocking "fire and forget" pattern)
-    runPdfHumanizationPipeline({
+    // Always process inline with maxDuration = 60 for reliable Vercel serverless execution
+    const job = await runPdfHumanizationPipeline({
       jobId,
       traceId,
       fileName,
       pdfBuffer,
       intensity,
-    }).catch((err) => {
-      const {updatePdfJob} = require('@/lib/document/pdf-native-humanizer');
-      updatePdfJob(jobId, {
-        status: 'FAILED',
-        errorMessage: err instanceof Error ? err.message : 'Pipeline error',
-      });
     });
 
+    if (job.status === 'FAILED') {
+      return NextResponse.json(
+        {
+          error: job.errorMessage || 'PDF humanization failed.',
+          jobId,
+          traceId,
+        },
+        {status: 422}
+      );
+    }
+
+    // Return job status, download URL, AND direct base64 for instant zero-roundtrip client download
     return NextResponse.json({
       success: true,
       jobId,
       traceId,
-      status: 'PENDING',
-      totalPages: 0,
-      processedPages: 0,
-      progressPercent: 0,
-      pollUrl: `/api/documents/pdf-humanize/${jobId}`,
-      message: 'PDF humanization started. Poll the pollUrl for status updates.',
+      status: job.status,
+      totalPages: job.totalPages,
+      processedPages: job.processedPages,
+      failedPages: job.failedPages,
+      progressPercent: job.progressPercent,
+      downloadUrl: `/api/documents/pdf-humanize/${jobId}/download`,
+      pdfBase64: job.outputBuffer ? job.outputBuffer.toString('base64') : undefined,
+      completedAt: job.completedAt,
+      pageResults: job.pageResults.map((r) => ({
+        pageNumber: r.pageNumber,
+        status: r.status,
+        imageCount: r.imageCount,
+        errorReason: r.errorReason,
+        retryCount: r.retryCount,
+        durationMs: r.durationMs,
+      })),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unexpected server error during PDF upload.';

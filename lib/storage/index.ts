@@ -1,9 +1,25 @@
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 
 export type StorageBucket = 'original' | 'processing' | 'final' | 'temp';
 
-const STORAGE_ROOT = path.join(process.cwd(), 'storage');
+function resolveStorageRoot(): string {
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    return path.join(os.tmpdir(), 'humanflow_storage');
+  }
+  try {
+    const localDir = path.join(process.cwd(), 'storage');
+    if (!fs.existsSync(localDir)) {
+      fs.mkdirSync(localDir, {recursive: true});
+    }
+    return localDir;
+  } catch {
+    return path.join(os.tmpdir(), 'humanflow_storage');
+  }
+}
+
+const STORAGE_ROOT = resolveStorageRoot();
 
 let directoriesInitialized = false;
 

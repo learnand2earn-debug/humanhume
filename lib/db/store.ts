@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import {
   ApiUsageRecord,
   AppNotification,
@@ -865,7 +866,21 @@ const globalForDb = globalThis as unknown as {
   __humanFlowStateV4?: DatabaseState;
   __humanFlowPersistTimer?: ReturnType<typeof setTimeout> | null;
 };
-const ACTIVE_DB_FILE_PATH = path.join(process.cwd(), 'storage', 'humanflow_v4_db.json');
+function resolveDbPath(): string {
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    return path.join(os.tmpdir(), 'humanflow_v4_db.json');
+  }
+  try {
+    const localDir = path.join(process.cwd(), 'storage');
+    if (!fs.existsSync(localDir)) {
+      fs.mkdirSync(localDir, {recursive: true});
+    }
+    return path.join(localDir, 'humanflow_v4_db.json');
+  } catch {
+    return path.join(os.tmpdir(), 'humanflow_v4_db.json');
+  }
+}
+const ACTIVE_DB_FILE_PATH = resolveDbPath();
 let storageDirInitialized = false;
 
 function loadState(): DatabaseState {

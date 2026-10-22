@@ -44,6 +44,7 @@ interface PdfJob {
   startedAt?: string;
   completedAt?: string;
   downloadUrl?: string;
+  pdfBase64?: string;
   pageResults: PageResult[];
 }
 
@@ -157,10 +158,7 @@ export default function PdfHumanizerPanel() {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('intensity', intensity);
-        // Use sync mode for files < 800KB for instant results
-        if (file.size < 800 * 1024) {
-          formData.append('sync', 'true');
-        }
+        formData.append('sync', 'true');
 
         const res = await fetch('/api/documents/pdf-humanize', {
           method: 'POST',
@@ -178,8 +176,12 @@ export default function PdfHumanizerPanel() {
         setJob(data);
         setIsUploading(false);
 
-        // If sync and completed, no polling needed
-        if (data.status !== 'COMPLETED' && data.status !== 'FAILED') {
+        // If completed synchronously, automatically trigger download
+        if (data.status === 'COMPLETED') {
+          setTimeout(() => {
+            downloadPdfFile(data);
+          }, 350);
+        } else if (data.status !== 'FAILED') {
           startPolling(data.jobId);
         }
       } catch (err) {
@@ -224,17 +226,47 @@ export default function PdfHumanizerPanel() {
     [uploadPdf]
   );
 
-  // ── Download ───────────────────────────────────────────────────────────
-  const triggerDownload = useCallback(() => {
-    if (!job?.downloadUrl && !job?.jobId) return;
-    const url = job.downloadUrl || `/api/documents/pdf-humanize/${job.jobId}/download`;
+  // ── Download (Direct Blob + URL Fallback) ───────────────────────────────
+  const downloadPdfFile = useCallback((targetJob: PdfJob | null) => {
+    if (!targetJob) return;
+
+    // Direct Blob download from base64 (instant, zero server round-trip on Vercel)
+    if (targetJob.pdfBase64) {
+      try {
+        const byteCharacters = atob(targetJob.pdfBase64);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], {type: 'application/pdf'});
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = `Humanized_${targetJob.originalFileName || 'document.pdf'}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 1500);
+        return;
+      } catch {
+        // Fallback to standard URL below
+      }
+    }
+
+    if (!targetJob.downloadUrl && !targetJob.jobId) return;
+    const url = targetJob.downloadUrl || `/api/documents/pdf-humanize/${targetJob.jobId}/download`;
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Humanized_${job.originalFileName || 'document.pdf'}`;
+    a.download = `Humanized_${targetJob.originalFileName || 'document.pdf'}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-  }, [job]);
+  }, []);
+
+  const triggerDownload = useCallback(() => {
+    downloadPdfFile(job);
+  }, [downloadPdfFile, job]);
 
   // ── Reset ──────────────────────────────────────────────────────────────
   const reset = useCallback(() => {

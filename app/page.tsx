@@ -620,6 +620,14 @@ In order to maintain SLA compliance across all regions, engineering teams utiliz
             Humanizer Workspace
           </button>
           <button
+            onClick={() => setActiveNav('pdf-humanize')}
+            className={`hover:text-slate-100 transition-colors whitespace-nowrap shrink-0 py-1 ${
+              activeNav === 'pdf-humanize' ? 'text-slate-100 border-b border-indigo-500 font-semibold' : ''
+            }`}
+          >
+            PDF Humanizer (Images Preserved)
+          </button>
+          <button
             onClick={() => setActiveNav('studio')}
             className={`hover:text-slate-100 transition-colors whitespace-nowrap shrink-0 py-1 ${
               activeNav === 'studio' ? 'text-slate-100 border-b border-indigo-500' : ''
@@ -1854,6 +1862,13 @@ In order to maintain SLA compliance across all regions, engineering teams utiliz
                   </p>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* VIEW: PDF NATIVE HUMANIZER (PAGE-BY-PAGE WITH IMAGE PRESERVATION) */}
+          {activeNav === 'pdf-humanize' && (
+            <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-6 lg:p-8 space-y-6">
+              <PdfHumanizerPanel />
             </div>
           )}
         </main>

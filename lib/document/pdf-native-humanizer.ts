@@ -14,6 +14,9 @@
  */
 
 import zlib from 'zlib';
+import path from 'path';
+import os from 'os';
+import fs from 'fs';
 import {humanizeTextChunk} from '@/lib/humanizer/client';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -41,6 +44,7 @@ export interface PdfHumanizationJob {
   startedAt: string;
   completedAt?: string;
   outputBuffer?: Buffer;
+  pdfBase64?: string;
   pageResults: PageProcessingResult[];
 }
 
@@ -67,7 +71,7 @@ export interface PdfValidationResult {
   warnings: string[];
 }
 
-// ─── In-memory Job Store ──────────────────────────────────────────────────────
+// ─── In-memory + /tmp Job Store (Resilient to Vercel Serverless Cold Starts) ───
 
 declare global {
   var __pdfHumanizeJobs: Map<string, PdfHumanizationJob> | undefined;
@@ -76,14 +80,66 @@ declare global {
 const activeJobs: Map<string, PdfHumanizationJob> =
   globalThis.__pdfHumanizeJobs ?? (globalThis.__pdfHumanizeJobs = new Map<string, PdfHumanizationJob>());
 
+function persistJobToTmp(job: PdfHumanizationJob): void {
+  try {
+    const tmpDir = os.tmpdir();
+    const metaPath = path.join(tmpDir, `pdfhum-${job.jobId}.json`);
+    const metaPayload = {
+      ...job,
+      outputBuffer: undefined, // buffer saved separately
+    };
+    fs.writeFileSync(metaPath, JSON.stringify(metaPayload), 'utf-8');
+
+    if (job.outputBuffer && job.outputBuffer.length > 0) {
+      const pdfPath = path.join(tmpDir, `pdfhum-${job.jobId}.pdf`);
+      fs.writeFileSync(pdfPath, job.outputBuffer);
+    }
+  } catch {
+    // Non-blocking fallback if write restricted
+  }
+}
+
 export function getPdfJob(jobId: string): PdfHumanizationJob | undefined {
-  return activeJobs.get(jobId);
+  const inMem = activeJobs.get(jobId);
+  if (inMem && inMem.outputBuffer && inMem.outputBuffer.length > 0) {
+    return inMem;
+  }
+
+  // Cross-instance fallback for Vercel serverless Lambdas
+  try {
+    const tmpDir = os.tmpdir();
+    const metaPath = path.join(tmpDir, `pdfhum-${jobId}.json`);
+    const pdfPath = path.join(tmpDir, `pdfhum-${jobId}.pdf`);
+    if (fs.existsSync(metaPath)) {
+      const raw = fs.readFileSync(metaPath, 'utf-8');
+      const job = JSON.parse(raw) as PdfHumanizationJob;
+      if (fs.existsSync(pdfPath)) {
+        job.outputBuffer = fs.readFileSync(pdfPath);
+        if (!job.pdfBase64) {
+          job.pdfBase64 = job.outputBuffer.toString('base64');
+        }
+      }
+      activeJobs.set(jobId, job);
+      return job;
+    }
+  } catch {
+    // Fallback
+  }
+
+  return inMem;
 }
 
 export function updatePdfJob(jobId: string, updates: Partial<PdfHumanizationJob>): void {
-  const job = activeJobs.get(jobId);
+  let job = activeJobs.get(jobId);
+  if (!job) {
+    job = getPdfJob(jobId);
+  }
   if (job) {
     Object.assign(job, updates);
+    if (updates.outputBuffer && !job.pdfBase64) {
+      job.pdfBase64 = updates.outputBuffer.toString('base64');
+    }
+    persistJobToTmp(job);
   }
 }
 
@@ -106,6 +162,7 @@ export function createPdfJob(params: {
     pageResults: [],
   };
   activeJobs.set(params.jobId, job);
+  persistJobToTmp(job);
   return job;
 }
 
@@ -581,20 +638,65 @@ async function humanizePageWithRetry(params: {
   };
 }
 
-// ─── PDF Reconstruction with pdf-lib ─────────────────────────────────────────
+// ─── PDF Reconstruction with pdf-lib & Native Image Preservation ─────────────
+
+interface PageImageBoundary {
+  name: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
 /**
- * Rebuilds a new PDF from the original buffer, replacing page text content
- * while preserving all original images, fonts, and layout structure.
- *
- * Strategy: Instead of attempting to modify internal PDF text streams
- * (which requires precise glyph mapping and is error-prone), we:
- * 1. Load the original PDF with pdf-lib
- * 2. For each page, draw a white rectangle over the original text area
- * 3. Stamp the humanized text using pdf-lib's standard font
- * 4. Keep all image XObjects completely untouched
- *
- * This is the safest approach that guarantees image preservation.
+ * Parses transformation matrix `cm` immediately preceding image invocations `/Name Do`
+ * to calculate exact coordinates and dimensions of images on a page.
+ */
+function extractPageImageBounds(decompressedStream: string): PageImageBoundary[] {
+  const bounds: PageImageBoundary[] = [];
+  const regex = /((?:[\d.-]+\s+){6}cm\s*)+(?:\/([A-Za-z0-9_-]+)\s+Do)/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(decompressedStream)) !== null) {
+    const fullCm = match[0];
+    const imgName = match[2];
+    const cmMatches = [...fullCm.matchAll(/([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s+cm/g)];
+
+    let curX = 0;
+    let curY = 0;
+    let curW = 100;
+    let curH = 100;
+
+    for (const cm of cmMatches) {
+      const a = parseFloat(cm[1]);
+      const d = parseFloat(cm[4]);
+      const e = parseFloat(cm[5]);
+      const f = parseFloat(cm[6]);
+
+      if (Math.abs(a) > 0.01 && Math.abs(a) !== 1) curW = Math.abs(a);
+      if (Math.abs(d) > 0.01 && Math.abs(d) !== 1) curH = Math.abs(d);
+      if (e !== 0) curX = e;
+      if (f !== 0) curY = f;
+    }
+
+    bounds.push({
+      name: imgName,
+      x: curX,
+      y: curY,
+      width: Math.max(16, curW),
+      height: Math.max(16, curH),
+    });
+  }
+
+  return bounds;
+}
+
+/**
+ * Rebuilds the PDF page by page:
+ * 1. Strips all old text operators (`BT ... ET`) from each page's stream(s),
+ *    so ALL original pictures, photos, vector figures, logos, and graphics remain 100% in place.
+ * 2. Formats and stamps the humanized text across the page, cleanly avoiding any image zones.
+ * 3. Preserves all original page dimensions, aspect ratios, and visual fidelity.
  */
 export async function rebuildPdfWithHumanizedText(params: {
   originalBuffer: Buffer;
@@ -605,112 +707,174 @@ export async function rebuildPdfWithHumanizedText(params: {
   const {originalBuffer, pageResults, traceId} = params;
 
   try {
-    // Dynamic import to avoid server-side bundling issues
-    const {PDFDocument, StandardFonts, rgb, grayscale} = await import('pdf-lib');
+    const {PDFDocument, StandardFonts, rgb} = await import('pdf-lib');
 
-    const originalDoc = await PDFDocument.load(originalBuffer, {
-      ignoreEncryption: false,
+    // Load original PDF directly so all resources, XObjects, images, and pages are natively retained
+    const doc = await PDFDocument.load(originalBuffer, {
+      ignoreEncryption: true,
       updateMetadata: false,
     });
 
-    const outputDoc = await PDFDocument.create();
+    const pageCount = doc.getPageCount();
+    const regularFont = await doc.embedFont(StandardFonts.Helvetica);
+    const boldFont = await doc.embedFont(StandardFonts.HelveticaBold);
 
-    // Copy all pages from original (preserving images, graphics, fonts)
-    const pageIndices = originalDoc.getPageIndices();
-    const copiedPages = await outputDoc.copyPages(originalDoc, pageIndices);
+    for (let i = 0; i < pageCount; i++) {
+      const page = doc.getPage(i);
+      const {width, height} = page.getSize();
+      const pageImages: PageImageBoundary[] = [];
 
-    // Embed a clean, readable font for humanized text overlay
-    const regularFont = await outputDoc.embedFont(StandardFonts.Helvetica);
-    const boldFont = await outputDoc.embedFont(StandardFonts.HelveticaBold);
+      // Step 1: Strip text from page streams, preserving image operators & vectors
+      const contents: any = page.node.Contents();
+      const streams: any[] = contents ? (typeof contents.asArray === 'function' ? contents.asArray() : [contents]) : [];
 
-    for (let i = 0; i < copiedPages.length; i++) {
-      const page = copiedPages[i];
-      outputDoc.addPage(page);
+      for (const s of streams) {
+        const raw: any = doc.context.lookup(s);
+        if (!raw || typeof raw.getContents !== 'function') continue;
 
-      const result = pageResults.find(r => r.pageIndex === i);
+        try {
+          const rawBuffer = Buffer.from(raw.getContents());
+          let decomp = '';
+          let isRaw = false;
+
+          try {
+            decomp = zlib.inflateSync(rawBuffer).toString('latin1');
+          } catch {
+            decomp = zlib.inflateRawSync(rawBuffer).toString('latin1');
+            isRaw = true;
+          }
+
+          if (decomp) {
+            // Collect images
+            const imgs = extractPageImageBounds(decomp);
+            pageImages.push(...imgs);
+
+            // Strip out old text blocks (BT ... ET)
+            decomp = decomp.replace(/\bBT[\s\S]*?ET\b/g, '');
+
+            // Re-compress back to stream
+            raw.contents = isRaw
+              ? zlib.deflateRawSync(Buffer.from(decomp, 'latin1'))
+              : zlib.deflateSync(Buffer.from(decomp, 'latin1'));
+          }
+        } catch {
+          // Stream is uncompressed or non-standard — preserve stream
+        }
+      }
+
+      // Step 2: Render humanized text on the page
+      const result = pageResults.find((r) => r.pageIndex === i);
       const humanizedText = result?.humanizedText || result?.originalText || '';
 
-      // Only stamp humanized text if the page has meaningful readable text
-      // and the humanized text differs from the original
-      if (
-        result &&
-        result.status === 'HUMANIZED' &&
-        humanizedText &&
-        humanizedText.trim().length > 10 &&
-        humanizedText !== result.originalText
-      ) {
-        const {width, height} = page.getSize();
+      if (humanizedText && humanizedText.trim().length > 0) {
+        const marginX = 46;
+        const contentWidth = width - marginX * 2;
+        let cursorY = height - 52;
+        const minCursorY = 44;
 
-        // Draw a semi-transparent overlay panel at the bottom of the page
-        // This stamps the humanized version without obscuring original graphics
-        const overlayY = 40;
-        const overlayHeight = Math.min(height * 0.35, 280);
-        const margin = 36;
-        const contentWidth = width - margin * 2;
+        // Split text into paragraphs
+        const paragraphs = humanizedText.split(/\n\s*\n|\n/);
 
-        // Background panel for humanized text section
-        page.drawRectangle({
-          x: margin,
-          y: overlayY,
-          width: contentWidth,
-          height: overlayHeight,
-          color: rgb(0.98, 0.99, 1.0),
-          opacity: 0.95,
-          borderColor: rgb(0.8, 0.85, 0.95),
-          borderWidth: 0.5,
-        });
+        for (let pIdx = 0; pIdx < paragraphs.length; pIdx++) {
+          const rawPara = paragraphs[pIdx].trim();
+          if (!rawPara) continue;
 
-        // Header label
-        page.drawText('HUMANIZED TEXT', {
-          x: margin + 8,
-          y: overlayY + overlayHeight - 14,
-          size: 6,
-          font: boldFont,
-          color: rgb(0.3, 0.4, 0.7),
-        });
+          // Check if paragraph is a heading or title
+          const isHeading =
+            rawPara.startsWith('#') ||
+            /^[0-9]+(\.[0-9]+)*\s+[A-Z]/.test(rawPara) ||
+            (rawPara.length < 60 && !rawPara.endsWith('.') && pIdx === 0);
 
-        // Stamp humanized text in the overlay panel
-        const lines = wrapTextToLines(humanizedText, contentWidth - 16, regularFont, 9);
-        const maxLines = Math.floor((overlayHeight - 24) / 12);
-        let lineY = overlayY + overlayHeight - 26;
+          const cleanPara = rawPara.replace(/^#+\s*/, '');
+          const currentFont = isHeading ? boldFont : regularFont;
+          const fontSize = isHeading ? 13 : 9.5;
+          const lineHeight = isHeading ? 18 : 13.5;
 
-        for (let li = 0; li < Math.min(lines.length, maxLines); li++) {
-          page.drawText(lines[li], {
-            x: margin + 8,
-            y: lineY,
-            size: 9,
-            font: regularFont,
-            color: rgb(0.1, 0.1, 0.2),
-          });
-          lineY -= 12;
+          const words = cleanPara.split(/\s+/);
+          let currentLine = '';
+
+          for (const word of words) {
+            const testLine = currentLine ? `${currentLine} ${word}` : word;
+            const testWidth = currentFont.widthOfTextAtSize(testLine, fontSize);
+
+            if (testWidth > contentWidth && currentLine) {
+              // Check collision with preserved images
+              for (const img of pageImages) {
+                if (cursorY <= img.y + img.height + 8 && cursorY >= img.y - 8) {
+                  // Move cursor below the image so the picture is never covered
+                  cursorY = img.y - 14;
+                }
+              }
+
+              if (cursorY >= minCursorY) {
+                page.drawText(currentLine, {
+                  x: marginX,
+                  y: cursorY,
+                  size: fontSize,
+                  font: currentFont,
+                  color: isHeading ? rgb(0.12, 0.18, 0.32) : rgb(0.15, 0.15, 0.18),
+                });
+                cursorY -= lineHeight;
+              }
+              currentLine = word;
+            } else {
+              currentLine = testLine;
+            }
+          }
+
+          if (currentLine) {
+            for (const img of pageImages) {
+              if (cursorY <= img.y + img.height + 8 && cursorY >= img.y - 8) {
+                cursorY = img.y - 14;
+              }
+            }
+
+            if (cursorY >= minCursorY) {
+              page.drawText(currentLine, {
+                x: marginX,
+                y: cursorY,
+                size: fontSize,
+                font: currentFont,
+                color: isHeading ? rgb(0.12, 0.18, 0.32) : rgb(0.15, 0.15, 0.18),
+              });
+              cursorY -= isHeading ? 16 : 14;
+            }
+          }
+
+          // Paragraph gap
+          cursorY -= 6;
         }
 
-        // Trace watermark
-        page.drawText(`HumanFlow AI · ${traceId} · Page ${i + 1}`, {
-          x: margin + 8,
-          y: overlayY + 6,
-          size: 5.5,
+        // Step 3: Draw professional verification footer
+        page.drawText(`HumanFlow AI · Verified & Humanized · Trace: ${traceId}`, {
+          x: marginX,
+          y: 20,
+          size: 6.5,
+          font: regularFont,
+          color: rgb(0.5, 0.55, 0.65),
+        });
+
+        page.drawText(`Page ${i + 1} of ${pageCount}`, {
+          x: width - marginX - 60,
+          y: 20,
+          size: 6.5,
           font: regularFont,
           color: rgb(0.5, 0.55, 0.65),
         });
       }
     }
 
-    // Set PDF metadata
-    outputDoc.setTitle(`Humanized Document · ${traceId}`);
-    outputDoc.setCreator('HumanFlow AI · humanflow-native-v2');
-    outputDoc.setProducer('HumanFlow AI PDF Humanization Engine');
-    outputDoc.setModificationDate(new Date());
+    doc.setTitle(`Humanized Document · ${traceId}`);
+    doc.setCreator('HumanFlow AI · humanflow-native-v2');
+    doc.setProducer('HumanFlow AI PDF Humanization Engine');
+    doc.setModificationDate(new Date());
 
-    const outputBytes = await outputDoc.save({
-      useObjectStreams: false, // Maximum compatibility
-      addDefaultPage: false,
+    const outputBytes = await doc.save({
+      useObjectStreams: false,
     });
 
     return Buffer.from(outputBytes);
   } catch (err) {
-    // If pdf-lib fails (e.g. encrypted PDF), fall back to generating a new PDF
-    // with humanized text using jsPDF (existing infrastructure)
     const errMsg = err instanceof Error ? err.message : String(err);
     throw new Error(`PDF reconstruction failed: ${errMsg}`);
   }
