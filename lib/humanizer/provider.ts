@@ -208,27 +208,61 @@ export async function executeProviderHumanization(
     };
   }
 
-  const effectiveTimeoutMs = Math.min(config.timeoutMs || 3000, 3000);
+  const isHumanGpt = config.apiUrl.includes('humangpt.io');
+
+  // HumanGPT requires at least 15 words. For short snippets, use natural transform directly
+  const words = req.text.trim().split(/\s+/).filter(Boolean);
+  if (isHumanGpt && words.length < 15) {
+    const transformed = runNaturalHumanizationTransform(
+      req.text,
+      req.intensity,
+      req.isLegalClause,
+      req.protectedTokens
+    );
+    return {
+      success: true,
+      humanizedText: transformed,
+      provider: 'HumanFlow Built-In Engine (Text < 15 words)',
+      model: config.model || 'humangpt-rule',
+      durationMs: Math.max(2, Date.now() - startTime),
+      rawStatus: 200,
+      usedFallback: false,
+    };
+  }
+
+  const effectiveTimeoutMs = Math.min(config.timeoutMs || 20000, 45000);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), effectiveTimeoutMs);
 
   try {
-    const response = await fetch(config.apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        Authorization: `Bearer ${config.apiKey}`,
-        'X-API-Key': config.apiKey,
-        'X-Trace-Id': req.traceId || 'HF-LIVE',
-      },
-      body: JSON.stringify({
+    const requestHeaders: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      Authorization: `Bearer ${config.apiKey}`,
+    };
+
+    let requestBody: string;
+    if (isHumanGpt) {
+      requestBody = JSON.stringify({
+        text: req.text,
+        mode: req.intensity === 'LOW' ? 'light' : 'medium',
+      });
+    } else {
+      requestHeaders['X-API-Key'] = config.apiKey;
+      requestHeaders['X-Trace-Id'] = req.traceId || 'HF-LIVE';
+      requestBody = JSON.stringify({
         text: req.text,
         model: req.model || config.model || 'humanflow-pro-v2',
         intensity: req.intensity,
         preserve_meaning: true,
         preserve_tokens: req.protectedTokens || [],
-      }),
+      });
+    }
+
+    const response = await fetch(config.apiUrl, {
+      method: 'POST',
+      headers: requestHeaders,
+      body: requestBody,
       signal: controller.signal,
     });
 
@@ -249,10 +283,13 @@ export async function executeProviderHumanization(
     }
 
     if (!response.ok) {
+      const errObj = safeParsed.data?.error as {message?: string; code?: string} | undefined;
       const reason =
-        safeParsed.errorMessage || `External Humanizer API returned HTTP ${response.status}`;
+        errObj?.message ||
+        safeParsed.errorMessage ||
+        `External Humanizer API returned HTTP ${response.status}`;
       degradedEndpoints.set(config.apiUrl, {
-        until: Date.now() + 120_000,
+        until: Date.now() + 60_000,
         reason,
       });
       throw new Error(reason);
@@ -263,7 +300,7 @@ export async function executeProviderHumanization(
     if (!parsedText) {
       const reason = `External response did not contain humanized text at path "${config.responsePath}"`;
       degradedEndpoints.set(config.apiUrl, {
-        until: Date.now() + 120_000,
+        until: Date.now() + 60_000,
         reason,
       });
       throw new Error(reason);
@@ -274,8 +311,8 @@ export async function executeProviderHumanization(
     return {
       success: true,
       humanizedText: parsedText,
-      provider: 'External Humanizer API',
-      model: req.model || config.model,
+      provider: isHumanGpt ? 'HumanGPT API (humangpt.io)' : 'External Humanizer API',
+      model: req.model || config.model || (isHumanGpt ? 'humangpt-medium' : 'external-model'),
       durationMs,
       rawStatus: response.status,
       usedFallback: false,

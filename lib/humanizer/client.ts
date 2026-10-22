@@ -21,7 +21,7 @@ export async function humanizeTextChunk(
     apiKey: secrets.humanizerApiKey,
     model: settings.humanizerModel || 'humanflow-pro-v2',
     responsePath: settings.humanizerResponsePath || 'data.text',
-    timeoutMs: Math.min((settings.timeoutSeconds || 3) * 1000, 3000),
+    timeoutMs: Math.min((settings.timeoutSeconds || 20) * 1000, 45000),
   };
 
   let attempt = 0;
@@ -121,7 +121,7 @@ export async function testHumanizerConnection(customUrl?: string, customKey?: st
 
   const res = await executeProviderHumanization(
     {
-      text: 'In order to facilitate the implementation of the system, we utilize verified workflows.',
+      text: 'Artificial intelligence is rapidly transforming modern industries by automating complex workflows and generating structured documentation with high operational efficiency.',
       intensity: 'NORMAL',
       traceId: 'HF-ADMIN-TEST',
     },
@@ -131,7 +131,7 @@ export async function testHumanizerConnection(customUrl?: string, customKey?: st
       apiKey,
       model: settings.humanizerModel,
       responsePath: settings.humanizerResponsePath,
-      timeoutMs: 3500,
+      timeoutMs: 15000,
     }
   );
 

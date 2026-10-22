@@ -53,12 +53,16 @@ function buildInitialSeedState(): DatabaseState {
   const rawCheckerKey = process.env.CHECKER_API_KEY || '';
   const rawDiscordUrl = process.env.DISCORD_WEBHOOK_URL || '';
 
+  const defaultHumanizerUrl = 'https://api.humangpt.io/v1/humanize';
+  const defaultHumanizerKey = 'hgpt_2d79e4a9a59c7fe0028190842ebb728a32340c20';
+  const activeHumanizerKey = rawHumanizerKey || defaultHumanizerKey;
+
   const settings: PlatformSettings = {
-    processingMode: (process.env.PROCESSING_MODE as 'DEMO' | 'LIVE') || 'DEMO',
-    humanizerApiUrl: process.env.HUMANIZER_API_URL || 'https://api.humanflow-provider.example.com/v1/humanize',
-    humanizerApiKeyMasked: rawHumanizerKey ? maskSecretKey(rawHumanizerKey) : 'sk-***************92',
-    humanizerModel: process.env.HUMANIZER_MODEL || 'humanflow-pro-v2',
-    humanizerResponsePath: process.env.HUMANIZER_RESPONSE_PATH || 'data.text',
+    processingMode: (process.env.PROCESSING_MODE as 'DEMO' | 'LIVE') || 'LIVE',
+    humanizerApiUrl: process.env.HUMANIZER_API_URL || defaultHumanizerUrl,
+    humanizerApiKeyMasked: maskSecretKey(activeHumanizerKey),
+    humanizerModel: process.env.HUMANIZER_MODEL || 'medium',
+    humanizerResponsePath: process.env.HUMANIZER_RESPONSE_PATH || 'output',
     checkerApiUrl: process.env.CHECKER_API_URL || 'https://api.checker-provider.example.com/v1/detect',
     checkerApiKeyMasked: rawCheckerKey ? maskSecretKey(rawCheckerKey) : 'sk-***************48',
     checkerResponsePath: process.env.CHECKER_RESPONSE_SCORE_PATH || 'data.ai_score',
@@ -80,8 +84,8 @@ function buildInitialSeedState(): DatabaseState {
   };
 
   const secrets: RuntimeSecrets = {
-    humanizerApiUrl: process.env.HUMANIZER_API_URL || '',
-    humanizerApiKey: rawHumanizerKey,
+    humanizerApiUrl: process.env.HUMANIZER_API_URL || defaultHumanizerUrl,
+    humanizerApiKey: activeHumanizerKey,
     checkerApiUrl: process.env.CHECKER_API_URL || '',
     checkerApiKey: rawCheckerKey,
     discordWebhookUrl: rawDiscordUrl,
