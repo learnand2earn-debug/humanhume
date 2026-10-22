@@ -57,7 +57,7 @@ const PIPELINE_TIMELINE_STEPS = [
 export default function HumanFlowPlatformPage() {
   const [activeNav, setActiveNav] = useState<
     'workspace' | 'studio' | 'documents' | 'notifications' | 'admin' | 'help' | 'pdf-humanize'
-  >('workspace');
+  >('pdf-humanize');
 
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [selectedDoc, setSelectedDoc] = useState<DocumentRecord | null>(null);
@@ -229,6 +229,20 @@ export default function HumanFlowPlatformPage() {
 
   useEffect(() => {
     let active = true;
+
+    if (typeof window !== 'undefined') {
+      const searchParams = new URLSearchParams(window.location.search);
+      const tabParam = searchParams.get('tab');
+      const hash = window.location.hash.replace('#', '');
+      const target = tabParam || hash;
+      if (
+        target &&
+        ['workspace', 'studio', 'documents', 'notifications', 'admin', 'help', 'pdf-humanize'].includes(target)
+      ) {
+        setActiveNav(target as typeof activeNav);
+      }
+    }
+
     fetch('/api/documents')
       .then((res) =>
         parseResponseJsonSafely<{
@@ -612,20 +626,26 @@ In order to maintain SLA compliance across all regions, engineering teams utiliz
         {/* Zone 2: 4–5 concise single-line text navigation links */}
         <nav className="hidden md:flex items-center gap-6 text-xs font-medium text-slate-400">
           <button
+            onClick={() => setActiveNav('pdf-humanize')}
+            className={`hover:text-slate-100 transition-colors whitespace-nowrap shrink-0 py-1 flex items-center gap-1.5 ${
+              activeNav === 'pdf-humanize'
+                ? 'text-white border-b-2 border-indigo-400 font-bold'
+                : 'text-indigo-300 hover:text-white'
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5 text-violet-400" />
+            PDF Humanizer (Images Preserved)
+            <span className="px-1.5 py-0.5 text-[9px] uppercase font-bold tracking-wider rounded bg-indigo-600/30 text-indigo-300 border border-indigo-500/30">
+              Primary
+            </span>
+          </button>
+          <button
             onClick={() => setActiveNav('workspace')}
             className={`hover:text-slate-100 transition-colors whitespace-nowrap shrink-0 py-1 ${
-              activeNav === 'workspace' ? 'text-slate-100 border-b border-indigo-500' : ''
+              activeNav === 'workspace' ? 'text-slate-100 border-b border-indigo-500 font-semibold' : ''
             }`}
           >
             Humanizer Workspace
-          </button>
-          <button
-            onClick={() => setActiveNav('pdf-humanize')}
-            className={`hover:text-slate-100 transition-colors whitespace-nowrap shrink-0 py-1 ${
-              activeNav === 'pdf-humanize' ? 'text-slate-100 border-b border-indigo-500 font-semibold' : ''
-            }`}
-          >
-            PDF Humanizer (Images Preserved)
           </button>
           <button
             onClick={() => setActiveNav('studio')}
@@ -685,8 +705,8 @@ In order to maintain SLA compliance across all regions, engineering teams utiliz
                 Core Platform
               </p>
               {[
+                {id: 'pdf-humanize', label: 'PDF Humanizer (Images Preserved)', icon: Sparkles},
                 {id: 'workspace', label: 'Upload & Humanize', icon: Upload},
-                {id: 'pdf-humanize', label: 'PDF Humanizer', icon: Sparkles},
                 {id: 'studio', label: 'Documentation Studio', icon: Scale},
                 {
                   id: 'documents',
@@ -779,6 +799,34 @@ In order to maintain SLA compliance across all regions, engineering teams utiliz
           {/* VIEW 1: UPLOAD & AUTONOMOUS HUMANIZATION WORKSPACE */}
           {activeNav === 'workspace' && (
             <>
+              {/* Quick Switch Banner to PDF Humanizer */}
+              <div className="bg-gradient-to-r from-violet-950/80 via-indigo-950/80 to-slate-900/90 border border-violet-500/40 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-violet-600/20 border border-violet-500/30 flex items-center justify-center shrink-0">
+                    <Sparkles className="w-5 h-5 text-violet-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+                      PDF Document Humanizer (With Native Image Preservation)
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30">
+                        ACTIVE
+                      </span>
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Upload any PDF — all pictures, diagrams, and figures stay 100% in place while every page is humanized.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveNav('pdf-humanize')}
+                  className="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white rounded-lg text-xs font-semibold shrink-0 transition-colors shadow-lg shadow-violet-950/50 cursor-pointer flex items-center gap-1.5"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Open PDF Humanizer
+                </button>
+              </div>
+
               {/* Hero & Zero-Touch Upload Dropzone */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
                 <div className="lg:col-span-7 bg-slate-900/90 border border-slate-800 rounded-xl p-6 flex flex-col justify-between space-y-5">
@@ -1290,9 +1338,11 @@ In order to maintain SLA compliance across all regions, engineering teams utiliz
             </>
           )}
 
-          {/* VIEW: DEDICATED PDF HUMANIZER (RESILIENT CHUNKED ENGINE) */}
+          {/* VIEW: DEDICATED PDF HUMANIZER (PAGE-BY-PAGE WITH IMAGE PRESERVATION) */}
           {activeNav === 'pdf-humanize' && (
-            <PdfHumanizerPanel />
+            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 lg:p-8 space-y-6 shadow-2xl">
+              <PdfHumanizerPanel />
+            </div>
           )}
 
           {/* VIEW 2: DOCUMENTATION STUDIO + LEGAL KNOWLEDGE BASE */}
@@ -1862,13 +1912,6 @@ In order to maintain SLA compliance across all regions, engineering teams utiliz
                   </p>
                 </div>
               </div>
-            </div>
-          )}
-
-          {/* VIEW: PDF NATIVE HUMANIZER (PAGE-BY-PAGE WITH IMAGE PRESERVATION) */}
-          {activeNav === 'pdf-humanize' && (
-            <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-6 lg:p-8 space-y-6">
-              <PdfHumanizerPanel />
             </div>
           )}
         </main>
