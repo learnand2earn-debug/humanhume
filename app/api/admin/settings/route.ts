@@ -1,37 +1,27 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { repository } from '@/lib/db/repository';
+import {NextRequest, NextResponse} from 'next/server';
+import {getDbState, updatePlatformSettings, addSystemLog} from '@/lib/db/store';
 
 export async function GET() {
-  try {
-    const masked = repository.getMaskedSettings();
-    return NextResponse.json({ settings: masked });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
+  const state = getDbState();
+  // Returns only masked keys (sk-***************92), never raw secrets
+  return NextResponse.json({
+    settings: state.settings,
+  });
 }
 
 export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    const updated = repository.updateSettings(body);
-    const masked = repository.getMaskedSettings();
+  const body = await req.json().catch(() => ({}));
+  const updated = updatePlatformSettings(body);
 
-    repository.addLog({
-      traceId: 'SYSTEM',
-      level: 'info',
-      module: 'AdminSettings',
-      action: 'settings_updated',
-      message: `System configuration updated (Mode: ${updated.mode}, Retries: ${updated.maxRetries})`,
-    });
+  addSystemLog({
+    traceId: 'HF-ADMIN-CONFIG',
+    level: 'SECURITY',
+    stage: 'SETTINGS_UPDATE',
+    message: `Administrator updated platform settings (Mode: ${updated.processingMode}, Max Retries: ${updated.maxRetries}). API keys remain masked.`,
+  });
 
-    return NextResponse.json({
-      success: true,
-      settings: masked,
-      message: 'Configuration successfully updated.',
-    });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
+  return NextResponse.json({
+    success: true,
+    settings: updated,
+  });
 }

@@ -2,17 +2,24 @@ export interface CheckerRequest {
   text: string;
   documentId: string;
   versionId: string;
-  retryCount?: number;
+  traceId?: string;
+  retryIteration?: number;
 }
 
-export interface CheckerResult {
-  score: number; // 0 - 100% (Probability that text is AI-generated)
-  confidence: number; // 0.0 - 1.0
-  provider: string;
-  status: 'PASS' | 'FAIL' | 'REVIEW';
+export interface CheckerResponse {
+  score: number; // Estimated AI probability percentage (0 - 100, lower is better, e.g., 6%)
+  confidence: number; // 0 - 100
+  status: 'PASS' | 'WARNING' | 'FAIL';
   detectedIssues: string[];
-  flaggedSections: string[];
+  providerName: string;
   timestamp: string;
-  perplexityScore?: number;
-  burstinessScore?: number;
+  durationMs: number;
+}
+
+export interface CheckerProviderConfig {
+  mode: 'DEMO' | 'LIVE';
+  apiUrl: string;
+  apiKey: string;
+  responsePath: string;
+  timeoutMs: number;
 }

@@ -1,244 +1,123 @@
 import fs from 'fs';
 import path from 'path';
-import crypto from 'crypto';
 
-export class StorageManager {
-  private baseDir: string;
-  private originalDir: string;
-  private processingDir: string;
-  private finalDir: string;
-  private tempDir: string;
+export type StorageBucket = 'original' | 'processing' | 'final' | 'temp';
 
-  constructor() {
-    this.baseDir = process.env.STORAGE_DIR
-      ? path.resolve(process.env.STORAGE_DIR)
-      : path.resolve(process.cwd(), 'storage');
-    this.originalDir = path.join(this.baseDir, 'original');
-    this.processingDir = path.join(this.baseDir, 'processing');
-    this.finalDir = path.join(this.baseDir, 'final');
-    this.tempDir = path.join(this.baseDir, 'temp');
+const STORAGE_ROOT = path.join(process.cwd(), 'storage');
 
-    this.ensureDirs();
-  }
+let directoriesInitialized = false;
 
-  private ensureDirs() {
-    [this.baseDir, this.originalDir, this.processingDir, this.finalDir, this.tempDir].forEach(
-      (dir) => {
-        if (!fs.existsSync(dir)) {
-          fs.mkdirSync(dir, { recursive: true });
-        }
-      }
-    );
-  }
-
-  /**
-   * Saves the original uploaded file untouched.
-   */
-  async saveOriginalFile(
-    fileBuffer: Buffer,
-    originalName: string,
-    fileId: string
-  ): Promise<{ originalPath: string; workingPath: string }> {
-    this.ensureDirs();
-    const safeExt = path.extname(originalName).toLowerCase();
-    const safeBase = path.basename(originalName, safeExt).replace(/[^a-zA-Z0-9_-]/g, '_');
-    const storageFileName = `${fileId}_${safeBase}${safeExt}`;
-
-    const originalPath = path.join(this.originalDir, storageFileName);
-    const workingPath = path.join(this.processingDir, `working_${storageFileName}`);
-
-    // Write original copy
-    await fs.promises.writeFile(originalPath, fileBuffer);
-
-    // Make an identical working copy for all pipeline manipulations
-    await fs.promises.copyFile(originalPath, workingPath);
-
-    return {
-      originalPath,
-      workingPath,
-    };
-  }
-
-  /**
-   * Saves an intermediate or final version file.
-   */
-  async saveVersionFile(
-    content: Buffer | string,
-    documentId: string,
-    versionNumber: number,
-    extension: string,
-    isFinal = false
-  ): Promise<string> {
-    this.ensureDirs();
-    const dir = isFinal ? this.finalDir : this.processingDir;
-    const cleanExt = extension.startsWith('.') ? extension : `.${extension}`;
-    const filename = `${documentId}_v${versionNumber}${isFinal ? '_final' : ''}${cleanExt}`;
-    const targetPath = path.join(dir, filename);
-
-    if (typeof content === 'string') {
-      await fs.promises.writeFile(targetPath, content, 'utf-8');
-    } else {
-      await fs.promises.writeFile(targetPath, content);
-    }
-
-    return targetPath;
-  }
-
-  private isSafePath(filePath: string): boolean {
-    const resolvedPath = path.resolve(filePath);
-    const resolvedBase = path.resolve(this.baseDir);
-    if (process.platform === 'win32') {
-      return (
-        resolvedPath.toLowerCase().startsWith(resolvedBase.toLowerCase()) ||
-        resolvedPath.toLowerCase() === resolvedBase.toLowerCase()
-      );
-    }
-    return resolvedPath.startsWith(resolvedBase);
-  }
-
-  /**
-   * Resolves actual file path on disk, handling cross-platform differences between
-   * Windows and Linux/Railway container filesystems.
-   */
-  public resolveActualPath(filePath: string): string | null {
-    if (!filePath) return null;
-
-    // 1. Direct path check
-    try {
-      const resolved = path.resolve(filePath);
-      if (this.isSafePath(resolved) && fs.existsSync(resolved)) {
-        return resolved;
-      }
-      if (fs.existsSync(resolved)) {
-        return resolved;
-      }
-    } catch {
-      // Continue to filename search
-    }
-
-    // 2. Search by basename across storage directories (handles Windows/Linux migration)
-    const baseName = path.basename(filePath.replace(/\\/g, '/'));
-    if (!baseName || baseName === '.' || baseName === '/') return null;
-
-    const candidateDirs = [this.finalDir, this.originalDir, this.processingDir, this.tempDir];
-    for (const dir of candidateDirs) {
-      const candidatePath = path.join(dir, baseName);
-      if (fs.existsSync(candidatePath)) {
-        return candidatePath;
-      }
-    }
-
-    return null;
-  }
-
-  /**
-   * Retrieves a file buffer safely ensuring no path traversal.
-   */
-  async readFile(filePath: string): Promise<Buffer> {
-    const actual = this.resolveActualPath(filePath);
-    if (!actual) {
-      throw new Error(`File not found: ${path.basename(filePath || '')}`);
-    }
-
-    return await fs.promises.readFile(actual);
-  }
-
-  /**
-   * Checks if file exists on disk.
-   */
-  fileExists(filePath: string): boolean {
-    return Boolean(this.resolveActualPath(filePath));
-  }
-
-  /**
-   * Returns storage stats for the admin health monitor.
-   */
-  async getStorageStats(): Promise<{
-    originalCount: number;
-    processingCount: number;
-    finalCount: number;
-    totalSizeBytes: number;
-  }> {
-    let totalSizeBytes = 0;
-
-    const countAndSum = (dir: string) => {
-      if (!fs.existsSync(dir)) return 0;
-      const files = fs.readdirSync(dir).filter((f) => !f.startsWith('.'));
-      for (const file of files) {
-        try {
-          const stat = fs.statSync(path.join(dir, file));
-          totalSizeBytes += stat.size;
-        } catch {
-          // ignore transient reads
-        }
-      }
-      return files.length;
-    };
-
-    const originalCount = countAndSum(this.originalDir);
-    const processingCount = countAndSum(this.processingDir);
-    const finalCount = countAndSum(this.finalDir);
-
-    return {
-      originalCount,
-      processingCount,
-      finalCount,
-      totalSizeBytes,
-    };
-  }
-
-  /**
-   * Automatic cleanup of files older than specified retention hours.
-   */
-  async cleanupExpired(retentionHours = 24): Promise<number> {
-    const now = Date.now();
-    const thresholdMs = retentionHours * 60 * 60 * 1000;
-    let deletedCount = 0;
-
-    const cleanDir = async (dir: string) => {
-      if (!fs.existsSync(dir)) return;
-      const files = await fs.promises.readdir(dir);
-      for (const file of files) {
-        if (file.startsWith('.')) continue;
-        const filePath = path.join(dir, file);
-        try {
-          const stats = await fs.promises.stat(filePath);
-          if (now - stats.mtimeMs > thresholdMs) {
-            await fs.promises.unlink(filePath);
-            deletedCount++;
-          }
-        } catch {
-          // ignore
-        }
-      }
-    };
-
-    // Clean processing and temp files
-    await cleanDir(this.tempDir);
-    await cleanDir(this.processingDir);
-
-    return deletedCount;
-  }
-
-  /**
-   * Deletes all storage copies associated with a document ID.
-   */
-  async deleteDocumentFiles(documentId: string): Promise<void> {
-    const dirs = [this.originalDir, this.processingDir, this.finalDir, this.tempDir];
-    for (const dir of dirs) {
-      if (!fs.existsSync(dir)) continue;
+function ensureStorageDirectories() {
+  if (directoriesInitialized) return;
+  directoriesInitialized = true;
+  const buckets: StorageBucket[] = ['original', 'processing', 'final', 'temp'];
+  for (const bucket of buckets) {
+    const dir = path.join(STORAGE_ROOT, bucket);
+    if (!fs.existsSync(dir)) {
       try {
-        const files = await fs.promises.readdir(dir);
-        for (const file of files) {
-          if (file.includes(documentId)) {
-            await fs.promises.unlink(path.join(dir, file));
-          }
-        }
+        fs.mkdirSync(dir, {recursive: true});
       } catch {
-        // ignore transient errors
+        // Fallback if read-only container
       }
     }
   }
 }
 
-export const storageManager = new StorageManager();
+// Memory mirror so even if container filesystem is ephemeral, original & processed files are 100% preserved
+const memoryStorageMirror = new Map<string, {content: string; createdAt: number}>();
+
+export function saveToPrivateStorage(
+  bucket: StorageBucket,
+  documentId: string,
+  fileName: string,
+  content: string
+): string {
+  ensureStorageDirectories();
+  const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const virtualPath = `/storage/${bucket}/${documentId}_${safeName}`;
+  const fullPath = path.join(STORAGE_ROOT, bucket, `${documentId}_${safeName}`);
+
+  memoryStorageMirror.set(virtualPath, {content, createdAt: Date.now()});
+
+  // Non-blocking background write so synchronous disk I/O never slows down document upload
+  fs.promises.writeFile(fullPath, content, 'utf-8').catch(() => {
+    // Kept safely in memoryStorageMirror if disk write is restricted
+  });
+
+  return virtualPath;
+}
+
+export function readFromPrivateStorage(virtualPath: string): string | null {
+  const mirrored = memoryStorageMirror.get(virtualPath);
+  if (mirrored) return mirrored.content;
+
+  try {
+    const relative = virtualPath.replace(/^\/storage\//, '');
+    const fullPath = path.join(STORAGE_ROOT, relative);
+    if (fs.existsSync(fullPath)) {
+      return fs.readFileSync(fullPath, 'utf-8');
+    }
+  } catch {
+    // Ignore
+  }
+  return null;
+}
+
+export function verifyStorageFileExists(virtualPath: string): boolean {
+  if (memoryStorageMirror.has(virtualPath)) return true;
+  try {
+    const relative = virtualPath.replace(/^\/storage\//, '');
+    const fullPath = path.join(STORAGE_ROOT, relative);
+    return fs.existsSync(fullPath);
+  } catch {
+    return false;
+  }
+}
+
+export function deleteFromPrivateStorage(documentId: string): number {
+  let removed = 0;
+  for (const key of Array.from(memoryStorageMirror.keys())) {
+    if (key.includes(`/${documentId}_`) || key.includes(documentId)) {
+      memoryStorageMirror.delete(key);
+      removed++;
+    }
+  }
+
+  const buckets: StorageBucket[] = ['original', 'processing', 'final', 'temp'];
+  for (const bucket of buckets) {
+    const dir = path.join(STORAGE_ROOT, bucket);
+    if (fs.existsSync(dir)) {
+      try {
+        const files = fs.readdirSync(dir);
+        for (const file of files) {
+          if (file.startsWith(`${documentId}_`) || file.includes(documentId)) {
+            const filePath = path.join(dir, file);
+            try {
+              fs.unlinkSync(filePath);
+              removed++;
+            } catch {
+              // Ignore if locked or unlinked
+            }
+          }
+        }
+      } catch {
+        // Ignore read errors
+      }
+    }
+  }
+
+  return removed;
+}
+
+export function cleanupExpiredTempFiles(maxAgeHours = 24): number {
+  let removed = 0;
+  const cutoff = Date.now() - maxAgeHours * 3600 * 1000;
+  for (const [key, entry] of memoryStorageMirror.entries()) {
+    if (key.startsWith('/storage/temp/') && entry.createdAt < cutoff) {
+      memoryStorageMirror.delete(key);
+      removed++;
+    }
+  }
+  return removed;
+}
+

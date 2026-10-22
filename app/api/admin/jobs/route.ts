@@ -1,13 +1,9 @@
-import { NextResponse } from 'next/server';
-import { repository } from '@/lib/db/repository';
+import {NextResponse} from 'next/server';
+import {getDbState} from '@/lib/db/store';
 
 export async function GET() {
-  try {
-    const jobs = repository.listJobs();
-    const documents = repository.listDocuments();
-    return NextResponse.json({ jobs, documents });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
+  const state = getDbState();
+  return NextResponse.json({
+    jobs: state.jobs,
+  });
 }

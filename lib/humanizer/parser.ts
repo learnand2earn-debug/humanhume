@@ -1,88 +1,67 @@
 /**
- * Configurable response parser that extracts the humanized text
- * from arbitrary external API responses without hard-coding the shape.
+ * Configurable Response Parser for Provider-Independent Humanizer API
+ * Supports custom dot-notation paths (e.g., "data.text", "result.output", "choices.0.message.content")
+ * and automatically falls back to common response schemas if the primary path is absent.
  */
-export class HumanizerResponseParser {
-  /**
-   * Resolves a nested property path like 'choices[0].message.content' or 'data.text'
-   */
-  static extractByPath(obj: any, path: string): string | null {
-    if (!obj) return null;
-    if (typeof obj === 'string') return obj;
+export function parseHumanizerApiResponse(
+  payload: unknown,
+  configuredPath = 'data.text'
+): string | null {
+  if (!payload) return null;
+  if (typeof payload === 'string') {
+    const trimmed = payload.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
 
-    // Direct string keys if single word
-    if (typeof obj[path] === 'string') {
-      return obj[path];
+  if (typeof payload !== 'object') return null;
+
+  const extractByPath = (obj: Record<string, unknown>, path: string): unknown => {
+    const segments = path
+      .replace(/\[(\d+)\]/g, '.$1')
+      .split('.')
+      .filter(Boolean);
+    let current: unknown = obj;
+    for (const seg of segments) {
+      if (current === null || current === undefined || typeof current !== 'object') {
+        return undefined;
+      }
+      current = (current as Record<string, unknown>)[seg];
     }
+    return current;
+  };
 
-    try {
-      // Normalize bracket access: choices[0].message -> choices.0.message
-      const normalizedPath = path.replace(/\[(\w+)\]/g, '.$1');
-      const parts = normalizedPath.split('.');
-      let current = obj;
+  const record = payload as Record<string, unknown>;
 
-      for (const part of parts) {
-        if (current === null || current === undefined) {
-          return null;
-        }
-        current = current[part];
-      }
-
-      if (typeof current === 'string') {
-        return current;
-      }
-      if (typeof current === 'object' && current !== null) {
-        return JSON.stringify(current);
-      }
-      return null;
-    } catch {
-      return null;
+  // 1. Try user/admin configured path first
+  if (configuredPath) {
+    const customResult = extractByPath(record, configuredPath);
+    if (typeof customResult === 'string' && customResult.trim().length > 0) {
+      return customResult.trim();
     }
   }
 
-  /**
-   * Discovers text automatically if path does not match
-   */
-  static autoParse(responseBody: any): string {
-    if (typeof responseBody === 'string') {
-      return responseBody;
+  // 2. Try standard fallback paths used across commercial Humanizer / LLM endpoints
+  const fallbackPaths = [
+    'data.text',
+    'data.humanized_text',
+    'data.output',
+    'humanized_text',
+    'humanizedText',
+    'text',
+    'output',
+    'result.text',
+    'result',
+    'response',
+    'choices.0.message.content',
+    'choices.0.text',
+  ];
+
+  for (const path of fallbackPaths) {
+    const val = extractByPath(record, path);
+    if (typeof val === 'string' && val.trim().length > 0) {
+      return val.trim();
     }
-
-    // Try common AI provider formats
-    const candidatePaths = [
-      'choices[0].message.content',
-      'choices[0].text',
-      'candidates[0].content.parts[0].text',
-      'content[0].text',
-      'data.text',
-      'data.humanized_text',
-      'data.result',
-      'result.text',
-      'result',
-      'output',
-      'response',
-      'text',
-      'message',
-    ];
-
-    for (const path of candidatePaths) {
-      const extracted = this.extractByPath(responseBody, path);
-      if (extracted && extracted.trim().length > 0) {
-        return extracted;
-      }
-    }
-
-    // If response is an object with a single string property
-    if (typeof responseBody === 'object' && responseBody !== null) {
-      for (const value of Object.values(responseBody)) {
-        if (typeof value === 'string' && value.length > 20) {
-          return value;
-        }
-      }
-    }
-
-    throw new Error(
-      `Unable to parse humanized text from API response. Configure HUMANIZER_RESPONSE_PATH in Admin Settings.`
-    );
   }
+
+  return null;
 }

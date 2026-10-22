@@ -1,22 +1,39 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { repository } from '@/lib/db/repository';
-import { JobQueue } from '@/lib/queue/queue';
+import {NextRequest, NextResponse} from 'next/server';
+import {getDocumentById} from '@/lib/db/store';
+import {
+  executeAutonomousDocumentPipeline,
+  regenerateSingleDocumentSection,
+} from '@/lib/queue/pipeline';
 
 export async function POST(
-  _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  req: NextRequest,
+  context: {params: Promise<{id: string}>}
 ) {
-  try {
-    const { id } = await params;
-    const doc = repository.getDocument(id);
-    if (!doc) {
-      return NextResponse.json({ error: 'Document not found' }, { status: 404 });
-    }
-
-    JobQueue.enqueue(id);
-    return NextResponse.json({ success: true, message: 'Processing initiated.' });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: message }, { status: 500 });
+  const {id} = await context.params;
+  const doc = getDocumentById(id);
+  if (!doc) {
+    return NextResponse.json({error: 'Document not found'}, {status: 404});
   }
+
+  const body = await req.json().catch(() => ({}));
+
+  // If sectionIndex is provided, regenerate only that single section
+  if (typeof body.sectionIndex === 'number') {
+    const updated = await regenerateSingleDocumentSection({
+      documentId: id,
+      sectionIndex: body.sectionIndex,
+      customInstruction: body.customInstruction,
+    });
+    return NextResponse.json({success: true, document: updated});
+  }
+
+  const reprocessed = await executeAutonomousDocumentPipeline({
+    fileName: doc.originalName,
+    fileType: doc.fileType,
+    fileSize: doc.fileSize,
+    rawContent: doc.originalContent,
+    existingDocId: doc.id,
+  });
+
+  return NextResponse.json({success: true, document: reprocessed});
 }

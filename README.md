@@ -1,237 +1,114 @@
-# HumanFlow AI — Automated Document Humanizer & Quality Control Platform
+# HumanFlow AI — Automated Document Humanizer & Documentation Studio
 
-> **Autonomous Document Processing System:** Upload once. HumanFlow AI automatically extracts text, isolates critical factual entities (citations, numbers, formulas, tables, dates, and headings), refines sentence cadence with an AI Humanizer API adapter, verifies undetectable AI scores through probabilistic heuristic and external checkers, auto-remediates flagged sentences, preserves original document formatting (DOCX, PDF, TXT, MD, RTF, XLSX), and delivers the finalized document.
+HumanFlow AI is a complete, production-ready autonomous **AI Document Humanization, Quality Control, and Legal/Technical Documentation Drafting Platform**.
 
----
-
-## Key Features
-
-- **Claude-Style Intelligent Checklist Studio (`/intelligent`):** 12-stage iterative workflow (Stages A through L) executing universal multi-file intake, deep content extraction, dynamic requirements checklists, missing-information prompts, deliverable generation, and post-generation verification audits.
-- **100% Autonomous Pipeline:** Single upload starts the entire workflow without manual intermediate button clicks.
-- **Strict Factual Preservation Agent:** Verifies numbers, percentages, currencies, dates, formulas, URLs, citations (`[1]`, `(Author, 2024)`), references, and markdown headings; automatically restores any altered factual entities.
-- **Provider-Independent Humanizer API Adapter:** Configurable REST adapter supporting OpenAI, Anthropic, Custom LLM APIs, and local Demo Mode.
-- **Quality & AI Detection Checker:** Real-time AI detection probability scoring, perplexity and burstiness analysis, and automatic multi-cycle retry loop (up to `MAX_RETRIES`).
-- **Side-by-Side Diff Engine:** Highlights polished phrasing, removed robotic padding, and protected tokens with Flesch-Kincaid readability scoring.
-- **Document Format Preservation:** Recreates true styled `.docx` files, formatted `.pdf` documents, structured `.rtf`, spreadsheets (`.xlsx`), and markdown/plain text.
-- **Free-First & Self-Hostable:** Built-in durable local storage and JSON database engine out of the box with zero external fees, plus full Supabase PostgreSQL integration when configured.
-- **Discord Webhook Notifications:** Real-time event notifications (Upload, Started, Completed, Retries, Failures) without transmitting private document contents.
-- **Animated Chatbot ("HumanFlow Assistant"):** Real-time AI assistant integrated with live document status and system telemetry.
-- **Enterprise Admin Console:** Dark glassmorphic interface with 8 management sections, masked API keys, live test probes ("Test Humanizer API", "Test Checker API"), and job controls.
+Users either upload an existing document (`DOCX`, `PDF`, `TXT`, `MD`, `RTF`, `XLSX`) for zero-touch humanization with 100% factual/entity preservation, or use the **Documentation Studio** to generate jurisdiction-aware legal and technical documents from an **Approved Legal Knowledge Base** that automatically flow through the humanization, AI quality checker, and legal preservation pipeline.
 
 ---
 
-## 1. Supported Document Formats
+## 1. Installation
 
-| Format | Extension | Processing Support | Output Fidelity |
-|---|---|---|---|
-| Microsoft Word | `.docx` | Paragraphs, headings, bullet lists, tables, bold/italics | High-fidelity `.docx` via OpenXML |
-| Portable Document | `.pdf` | Structured text extraction, layout parsing | Styled printable `.pdf` via PDFKit |
-| Plain Text | `.txt` | UTF-8 text extraction and line reconciliation | Preserved `.txt` |
-| Markdown | `.md` | Headings, code blocks, lists, equations | Formatted `.md` |
-| Rich Text | `.rtf` | RTF control codes parsed and stripped cleanly | Standard RTF 1.5 document |
-| Excel Spreadsheet | `.xlsx` | Multi-sheet tabular text extraction | Reconstructed `.xlsx` workbook |
-
-*Note: The original uploaded file is permanently preserved untouched in `/storage/original/`. All processing operations occur on isolated working copies.*
-
----
-
-## 2. Automatic Processing Pipeline
-
-```
-UPLOAD
-  ↓
-FILE VALIDATION (Format, Size <= 50MB, Malware check)
-  ↓
-TEXT EXTRACTION (Mammoth, PDF-Parse, SheetJS)
-  ↓
-DOCUMENT ANALYSIS (Structure, Sentence Cadence, Synthetic Markers)
-  ↓
-CONTENT PROTECTION (Isolates Citations, Numbers, Tables, Formulas)
-  ↓
-AI HUMANIZATION API (Adaptive Chunk Processing & Natural Phrasing)
-  ↓
-QUALITY CHECK & AI DETECTION (Heuristic Perplexity & Burstiness)
-  ↓
-FACTUAL PRESERVATION CHECK (Verifies Entities & Restores Deviations)
-  ↓
-AUTOMATIC FIX AGENT (Refines Flagged Phrasing if Threshold Exceeded)
-  ↓
-QUALITY LOOP (Re-check up to MAX_RETRIES, default: 3)
-  ↓
-GENERATE FINAL DOCUMENT (DOCX, PDF, RTF, TXT, MD, XLSX)
-  ↓
-ANTI-FAILSAFE VERIFICATION (Integrity Check)
-  ↓
-DISCORD NOTIFICATION & USER DOWNLOAD
-```
-
----
-
-## 3. Installation & Quick Start
-
-### Prerequisites
-- Node.js `v18.0.0` or higher (tested on Node v24)
-- npm `v9.0.0` or higher
-
-### Step 1: Install Dependencies
 ```bash
 npm install
 ```
 
-### Step 2: Configure Environment
-Copy `.env.example` to `.env.local`:
+## 2. Environment Variables
+
+Copy `.env.example` to `.env.local` (never commit `.env` or secret keys to Git):
+
 ```bash
 cp .env.example .env.local
 ```
 
-### Step 3: Run the Test Suite
-Verify that all 18 automated unit and integration tests pass:
-```bash
-npm test
+Supported server-side variables:
+
+```env
+# Humanizer API Adapter (Server-Side Only)
+HUMANIZER_API_URL=https://your-humanizer-provider.example.com/v1/humanize
+HUMANIZER_API_KEY=sk-your-secret-key
+HUMANIZER_MODEL=humanflow-pro-v2
+HUMANIZER_RESPONSE_PATH=data.text
+
+# Quality & AI Detection Checker Adapter (Server-Side Only)
+CHECKER_API_URL=https://your-checker-provider.example.com/v1/detect
+CHECKER_API_KEY=sk-your-checker-key
+CHECKER_RESPONSE_SCORE_PATH=data.ai_score
+
+# Discord Notifications
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+
+# Database (Optional — self-contained persistent store works out of the box)
+DATABASE_URL=postgresql://postgres:password@localhost:5432/humanflow
+SUPABASE_URL=
+SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+
+# Pipeline & Security Limits
+MAX_RETRIES=3
+MAX_FILE_SIZE_MB=50
+DEFAULT_RETENTION_HOURS=24
+PROCESSING_MODE=DEMO
 ```
 
-### Step 4: Seed Demo Data (Optional)
-Populate realistic sample documents and metrics:
-```bash
-npm run seed
-```
+## 3. Database Setup
 
-### Step 5: Start the Development Server
+HumanFlow AI runs out of the box using a self-contained persistent store (`/storage/humanflow_db.json`) so you can test the entire platform immediately without external cloud setup.
+
+To deploy with **Supabase PostgreSQL** or self-hosted **PostgreSQL**:
+1. Provision a PostgreSQL instance.
+2. Execute the complete relational migration script in `/lib/db/schema.sql`:
+   ```bash
+   psql "$DATABASE_URL" -f lib/db/schema.sql
+   ```
+3. Set `DATABASE_URL` in your environment.
+
+## 4. Humanizer API Setup
+
+1. Open **Admin Console → API & Automation Settings** (or configure `.env.local`).
+2. Enter your `Humanizer API URL`, `Humanizer API Key`, `Humanizer Model`, and configurable JSON response path (e.g., `data.text`, `choices.0.message.content`, or `output`).
+3. Switch from `DEMO MODE` to `LIVE MODE`.
+4. Click **Test Humanizer API** to verify credentials and inspect response latency. API keys are masked (`sk-***************92`) and never exposed to browser JavaScript.
+
+## 5. Checker Setup
+
+1. In **Admin Console → API & Automation Settings**, enter your external `Checker API URL` and `Checker API Key`.
+2. Click **Test Checker API** to verify connectivity.
+3. When running in `DEMO MODE` or without an external detector URL, HumanFlow AI uses its built-in deterministic stylometric and sentence-cadence analyzer.
+
+## 6. Discord Webhook Setup
+
+1. Create a webhook in your Discord Server (*Channel Settings → Integrations → Webhooks*).
+2. Paste the URL into `DISCORD_WEBHOOK_URL` or the **Admin Console → API Settings** panel.
+3. HumanFlow AI dispatches real-time notifications for uploads, completed humanizations, legal checks, and retry alerts without ever transmitting private document contents.
+
+## 7. Local Development
+
 ```bash
 npm run dev
 ```
-Open [http://localhost:3000](http://localhost:3000) in your browser.
 
----
+Open `http://localhost:3000`.
 
-## 4. Environment Variables Reference
+## 8. Production Deployment
 
-| Variable | Default | Description |
-|---|---|---|
-| `APP_MODE` | `demo` | `demo` (local simulation, no API keys needed) or `live` (external APIs) |
-| `HUMANIZER_API_URL` | `https://api.openai.com/v1/chat/completions` | Endpoint for the humanizer LLM provider |
-| `HUMANIZER_API_KEY` | *(empty)* | Secret API key (strictly server-side, masked in Admin UI) |
-| `HUMANIZER_MODEL` | `gpt-4o-mini` | Model identifier sent in the JSON payload |
-| `HUMANIZER_RESPONSE_PATH` | `choices[0].message.content` | JSON path to extract the humanized text |
-| `CHECKER_API_URL` | *(empty)* | Optional external AI detector API endpoint |
-| `CHECKER_API_KEY` | *(empty)* | Secret API key for the external detector |
-| `CHECKER_PROVIDER_NAME` | `HumanFlowQualityGuard` | Display name of the detection provider |
-| `AI_SCORE_PASS_THRESHOLD` | `20` | Maximum acceptable AI score percentage (<= 20% considered PASS) |
-| `MAX_RETRIES` | `3` | Maximum automatic correction cycles before finalizing |
-| `MAX_FILE_SIZE_MB` | `50` | Maximum file upload size limit |
-| `DOCUMENT_RETENTION_HOURS` | `24` | Auto-cleanup threshold for temporary working files |
-| `DISCORD_WEBHOOK_URL` | *(empty)* | Discord webhook URL for life-cycle notifications |
-| `SUPABASE_URL` | *(empty)* | Optional Supabase project URL |
-| `SUPABASE_SERVICE_ROLE_KEY`| *(empty)* | Optional Supabase service role key |
-| `ADMIN_PASSWORD` | `admin-humanflow-2026` | Admin authentication secret |
-
----
-
-## 5. Humanizer API Adapter Configuration
-
-The Humanizer adapter is provider-independent. You can connect OpenAI, Anthropic, OpenRouter, Mistral, or any custom API:
-
-### Example 1: OpenAI or Compatible
-- **URL:** `https://api.openai.com/v1/chat/completions`
-- **Key:** `sk-proj-...`
-- **Model:** `gpt-4o-mini`
-- **Response Path:** `choices[0].message.content`
-
-### Example 2: Custom In-House Endpoint
-- **URL:** `https://api.yourcompany.com/v1/humanize`
-- **Key:** `your_secret_key`
-- **Response Path:** `data.humanized_text`
-
-Test your credentials directly inside the Admin Console via the **"Test Humanizer API"** button. The console measures round-trip ping latency and validates authentication without exposing the key.
-
----
-
-## 6. Database Setup
-
-HumanFlow AI features a **Dual-Mode Database Architecture**:
-
-### Option A: Local Zero-Setup Mode (Default)
-By default, the platform uses an embedded, durable JSON repository (`/data/humanflow.json`). No external cloud database or Docker container is required.
-
-### Option B: Supabase PostgreSQL (Production)
-1. Create a project in [Supabase](https://supabase.com).
-2. Open the SQL Editor and execute the schema script located at:
-   ```
-   scripts/supabase_schema.sql
-   ```
-3. Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `.env.local`.
-
----
-
-## 7. Discord Webhook Setup
-
-1. In your Discord server, go to **Server Settings → Integrations → Webhooks**.
-2. Click **New Webhook**, select the target channel, and click **Copy Webhook URL**.
-3. Paste the URL into `DISCORD_WEBHOOK_URL` in `.env.local` or directly into the **Automation & Webhooks** tab in the Admin Console.
-4. Notifications include:
-   - 📄 Document Uploaded
-   - ⚡ Pipeline Started
-   - ✨ Document Completed with Quality Score
-   - 🚨 Processing Failure / Retries Reached
-
-*Privacy Notice: Document text and private file contents are NEVER sent to Discord.*
-
----
-
-## 8. Background Worker Deployment (VPS / Docker)
-
-For long-running tasks or environments where serverless timeouts apply, run the dedicated persistent worker:
+Build and start the production server:
 
 ```bash
-npm run worker
+npm run build
+npm start
 ```
 
-### Docker Deployment
-```dockerfile
-FROM node:20-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-COPY . .
-RUN npm run build
-EXPOSE 3000
-CMD ["npm", "start"]
-```
+For **Docker / VPS** self-hosted deployments with persistent `/storage/` volumes:
+- Mount `/app/storage` as a persistent volume so `/storage/original/`, `/storage/processing/`, `/storage/final/`, and `/storage/temp/` persist across container restarts.
 
----
+## 9. Worker Deployment
 
-## 9. Testing & Quality Assurance
-
-Run the automated test suite covering all 14 pipeline components:
-```bash
-npm test
-```
-
-Tests verify:
-- Supported format validation (`.docx`, `.pdf`, `.txt`, `.md`, `.rtf`, `.xlsx`) and rejection of invalid files.
-- Mammoth DOCX, PDFKit, and Markdown text extraction.
-- Factual entity detection (citations, currencies, dates, formulas, numbers, tables).
-- Reversibility of protected token mapping.
-- Flesch Reading Ease and Flesch-Kincaid Grade Level calculations.
-- Semantic chunk splitting and reassembly.
-- API response parsing across diverse formats.
-- Error recovery with exponential backoff on HTTP 429/503.
-- Key masking (`sk-***************92`) and repository persistence.
-
----
+For dedicated background queue processing and automatic 24-hour temporary file cleanup on a VPS or container worker:
+- The worker architecture resides in `/workers/worker.ts`, `/workers/queue.ts`, and `/workers/processor.ts`.
+- Invoke `runWorkerTick()` on your cron schedule or worker process loop.
 
 ## 10. Troubleshooting
 
-| Issue | Cause | Solution |
-|---|---|---|
-| **Humanizer API returned HTTP 401** | Invalid or expired API key | Check key in Admin Console or switch to `Demo Mode` |
-| **Unsupported file type** | File extension not recognized | Ensure file is `.docx`, `.pdf`, `.txt`, `.md`, `.rtf`, or `.xlsx` |
-| **Status: NEEDS_REVIEW** | Failsafe detected alteration of critical numbers/citations | Inspect side-by-side diff in UI; review restored version |
-| **Worker not picking up jobs** | Background worker stopped | Run `npm run worker` or trigger processing from Admin Console |
-| **Discord notifications not appearing** | Webhook URL invalid | Verify URL begins with `https://discord.com/api/webhooks/` |
-
----
-
-## License
-
-MIT License. Built with Next.js, React, TypeScript, and Tailwind CSS.
+- **Unsupported File Error**: Only `DOCX`, `PDF`, `TXT`, `MD`, `RTF`, and `XLSX` up to 50 MB are accepted. Unsupported files are rejected safely without touching the original file.
+- **Jurisdiction Required**: Legal documents in the Documentation Studio never assume jurisdiction. Select a governing jurisdiction (`United States`, `United Kingdom`, `European Union`, `UAE`, `Pakistan`, etc.) before clicking Generate.
+- **Knowledge Conflict Detected**: If two Legal Knowledge Base entries target the same document type and jurisdiction, resolve the conflict in **Admin Console → Legal Knowledge Base** before production use.

@@ -1,0 +1,6 @@
+{
+  "name": "HumanFlow AI — Automated Document Humanizer & Documentation Studio",
+  "description": "Autonomous AI document humanization, preservation verification, quality control, and legal/technical documentation drafting platform.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
