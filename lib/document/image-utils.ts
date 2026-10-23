@@ -1,6 +1,6 @@
 import zlib from 'zlib';
 import {EmbeddedDocumentImage} from '@/types';
-import {extractPdfPageData, parsePdfTextOperators} from './pdf-native-humanizer';
+import {extractPdfPageDataSync, parsePdfTextOperators} from './pdf-native-humanizer';
 
 /**
  * Parses exact intrinsic pixel dimensions (`width`, `height`, and `aspectRatio`)
@@ -793,7 +793,7 @@ export function extractReadableTextFromBinaryBuffer(
   // 3. Fast PDF text stream extraction using robust multi-filter decompressor
   if (isPdf && fileType === 'PDF') {
     try {
-      const pages = extractPdfPageData(rawBuffer);
+      const pages = extractPdfPageDataSync(rawBuffer);
       const combined = pages
         .map((p) => p.rawText)
         .filter((t) => t && t.trim().length > 0)

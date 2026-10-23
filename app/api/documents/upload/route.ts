@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
       // Dedicated PDF stream decompressor fallback
       if ((!extractedBinaryText || extractedBinaryText.trim().length < 20) && validation.fileType === 'PDF') {
         try {
-          const pages = extractPdfPageData(rawBuffer);
+          const pages = await extractPdfPageData(rawBuffer);
           const combined = pages.map((p) => p.rawText).filter(Boolean).join('\n\n');
           if (combined.trim().length > 20) {
             extractedBinaryText = combined;
