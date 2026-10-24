@@ -157,6 +157,12 @@ export const AI_CLICHE_TRANSFORMS: Array<[RegExp, string]> = [
   [/\bin accordance with the provisions of\b/gi, 'under'],
   [/\bIn accordance with\b/g, 'Under'],
   [/\bin accordance with\b/gi, 'under'],
+  [/\bFurthermore,\s*it is important to note that\b/gi, 'Notably,'],
+  [/\bFurthermore,\s*it is worth noting that\b/gi, 'Specifically,'],
+  [/\bFurthermore,\s*it is essential to remember that\b/gi, 'Importantly,'],
+  [/\bMoreover,\s*it is important to note that\b/gi, 'Notably,'],
+  [/\bMoreover,\s*it is worth noting that\b/gi, 'Specifically,'],
+  [/\bMoreover,\s*it is essential to remember that\b/gi, 'Importantly,'],
   [/\bIt is important to note that\b/gi, 'Notably,'],
   [/\bIt is worth noting that\b/gi, 'Specifically,'],
   [/\bIt is essential to remember that\b/gi, 'Keep in mind that'],
@@ -441,6 +447,9 @@ export function transformWithNaturalEngine(
   });
 
   working = humanizedParagraphs.join('\n\n');
+
+  // Clean double transition adverbs like "Furthermore, Notably," or "Moreover, Notably,"
+  working = working.replace(/\b(?:Furthermore|Moreover|Beyond that|Additionally|On top of that),\s*(Notably|Specifically|Importantly),/gi, '$1,');
 
   // 4. Restore masked protected tokens verbatim
   const restored = restoreProtectedTokens(working, placeholders);
