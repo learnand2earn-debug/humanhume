@@ -32,11 +32,12 @@ export async function humanizeWithGeminiAi(
 
 CRITICAL INSTRUCTIONS:
 1. Rewrite the text below so it sounds completely authentic, engaging, and naturally human, completely removing any trace of robotic AI generation.
-2. Vary sentence lengths (mix short punchy lines with natural rhythmic sentences).
-3. Eliminate AI buzzwords ("delve", "tapestry", "beacon", "testament", "pivotal", "multifaceted", "paramount importance", "furthermore", "moreover").
-4. NEVER alter dates, numbers, currency amounts, percentages, citations, proper nouns, emails, or markdown headings.
-5. Tone: ${intensity === 'LOW' ? 'Formal, precise, conservative human edit' : 'Engaging, clear, natural professional human tone'}.
-6. CRITICAL OUTPUT REQUIREMENT: Output ONLY the single rewritten humanized text. Do NOT add preamble (e.g. "Here is...", "Rewritten:"), do NOT add explanations, bullet options, or sign-offs.
+2. STRICT LANGUAGE PRESERVATION: You MUST output the humanized text in the EXACT SAME LANGUAGE as the input text (e.g., if input is English, output in English; if Urdu or Roman Urdu, output in Urdu/Roman Urdu; if Spanish, output in Spanish, etc.). NEVER translate the input text to any other language.
+3. Vary sentence lengths (mix short punchy lines with natural rhythmic sentences).
+4. Eliminate AI buzzwords ("delve", "tapestry", "beacon", "testament", "pivotal", "multifaceted", "paramount importance", "furthermore", "moreover").
+5. NEVER alter dates, numbers, currency amounts, percentages, citations, proper nouns, emails, or markdown headings.
+6. Tone: ${intensity === 'LOW' ? 'Formal, precise, conservative human edit' : 'Engaging, clear, natural professional human tone'}.
+7. CRITICAL OUTPUT REQUIREMENT: Output ONLY the single rewritten humanized text. Do NOT add preamble (e.g. "Here is...", "Rewritten:"), do NOT add explanations, bullet options, or sign-offs.
 
 TEXT TO HUMANIZE:
 ${text}`;
@@ -200,7 +201,7 @@ export const AI_CLICHE_TRANSFORMS: Array<[RegExp, string]> = [
   [/\bnavigating the complexities of\b/gi, 'working through'],
   [/\bnavigate the complexities of\b/gi, 'handle the details of'],
   [/\bnavigating the landscape of\b/gi, 'working across'],
-  [/\bin today's fast-paced world\b/gi, 'in today’s environment'],
+  [/\bin today's fast-paced world\b/gi, "in today's environment"],
   [/\bin today's digital landscape\b/gi, 'in modern digital systems'],
   [/\bin the contemporary era\b/gi, 'nowadays'],
   [/\ba myriad of\b/gi, 'a wide variety of'],

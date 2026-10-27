@@ -390,38 +390,36 @@ export function getDefaultSampleFigures(
 }
 
 /**
- * Fast, zero-backtracking PDF `/Subtype /Image` `/FlateDecode` XObject scanner.
- * Uses linear `indexOf('/Image')` lookup instead of `[\s\S]*?` regexes so even 20MB PDFs scan in < 3ms.
+ * Fast, comprehensive PDF `/Subtype /Image` XObject scanner.
+ * Extracts `/DCTDecode` (JPEG), `/FlateDecode` (zlib PNG), and uncompressed raw RGB/Gray image XObjects.
  */
-function extractPdfFlateImageXObjects(
+function extractPdfImageXObjects(
   rawBuffer: Buffer,
   docId: string,
   fileName: string,
   sectionCount: number
 ): EmbeddedDocumentImage[] {
   const results: EmbeddedDocumentImage[] = [];
-  const maxScanBytes = Math.min(rawBuffer.length, 6 * 1024 * 1024);
+  const maxScanBytes = Math.min(rawBuffer.length, 32 * 1024 * 1024);
   const latin1 = rawBuffer.subarray(0, maxScanBytes).toString('latin1');
 
   let searchPos = 0;
   let attempts = 0;
 
-  while (searchPos < latin1.length && results.length < 4 && attempts < 20) {
+  while (searchPos < latin1.length && results.length < 50 && attempts < 100) {
     const imgMarkerIdx = latin1.indexOf('/Image', searchPos);
     if (imgMarkerIdx === -1) break;
     searchPos = imgMarkerIdx + 6;
     attempts++;
 
     const dictStart = latin1.lastIndexOf('<<', imgMarkerIdx);
-    if (dictStart === -1 || imgMarkerIdx - dictStart > 450) continue;
+    if (dictStart === -1 || imgMarkerIdx - dictStart > 600) continue;
 
     const streamKeywordIdx = latin1.indexOf('stream', imgMarkerIdx);
-    if (streamKeywordIdx === -1 || streamKeywordIdx - imgMarkerIdx > 500) continue;
+    if (streamKeywordIdx === -1 || streamKeywordIdx - imgMarkerIdx > 600) continue;
 
     const dict = latin1.slice(dictStart, streamKeywordIdx);
-    if (!dict.includes('/Subtype') || !dict.includes('/FlateDecode') || dict.includes('/DCTDecode')) {
-      continue;
-    }
+    if (!dict.includes('/Subtype')) continue;
 
     const wMatch = dict.match(/\/Width\s+(\d+)/);
     const hMatch = dict.match(/\/Height\s+(\d+)/);
@@ -429,70 +427,127 @@ function extractPdfFlateImageXObjects(
 
     const width = parseInt(wMatch[1], 10);
     const height = parseInt(hMatch[1], 10);
-    if (width < 16 || height < 16 || width > 1200 || height > 1200) continue;
+    if (width < 2 || height < 2 || width > 16384 || height > 16384) continue;
 
     let streamStart = streamKeywordIdx + 6;
     if (latin1[streamStart] === '\r') streamStart++;
     if (latin1[streamStart] === '\n') streamStart++;
 
     const endStreamIdx = latin1.indexOf('endstream', streamStart);
-    if (endStreamIdx === -1 || endStreamIdx - streamStart > 2 * 1024 * 1024) continue;
+    if (endStreamIdx === -1 || endStreamIdx - streamStart > 20 * 1024 * 1024) continue;
 
     let streamEnd = endStreamIdx;
     if (latin1[streamEnd - 1] === '\n') streamEnd--;
     if (latin1[streamEnd - 1] === '\r') streamEnd--;
 
-    const compressedSlice = rawBuffer.subarray(streamStart, streamEnd);
-    try {
-      const inflated = zlib.inflateSync(compressedSlice);
-      const pixelCount = width * height;
-      const rgba = Buffer.alloc(pixelCount * 4);
+    const streamSlice = rawBuffer.subarray(streamStart, streamEnd);
+    if (streamSlice.length === 0) continue;
 
-      if (inflated.length === pixelCount * 3) {
-        for (let p = 0; p < pixelCount; p++) {
-          rgba[p * 4] = inflated[p * 3];
-          rgba[p * 4 + 1] = inflated[p * 3 + 1];
-          rgba[p * 4 + 2] = inflated[p * 3 + 2];
-          rgba[p * 4 + 3] = 255;
-        }
-      } else if (inflated.length === pixelCount * 4) {
-        inflated.copy(rgba, 0, 0, pixelCount * 4);
-      } else if (inflated.length === pixelCount) {
-        for (let p = 0; p < pixelCount; p++) {
-          const v = inflated[p];
-          rgba[p * 4] = v;
-          rgba[p * 4 + 1] = v;
-          rgba[p * 4 + 2] = v;
-          rgba[p * 4 + 3] = 255;
-        }
-      } else {
-        continue;
-      }
+    const isFlate = dict.includes('/FlateDecode');
+    const isDct = dict.includes('/DCTDecode');
+    const positionRatio = Number((dictStart / Math.max(1, rawBuffer.length)).toFixed(4));
+    const mappedSection = Math.min(
+      sectionCount - 1,
+      Math.max(0, Math.floor(positionRatio * sectionCount))
+    );
+    const aspectRatio = Number((width / height).toFixed(4));
 
-      const positionRatio = Number((dictStart / Math.max(1, rawBuffer.length)).toFixed(4));
-      const mappedSection = Math.min(
-        sectionCount - 1,
-        Math.max(0, Math.floor(positionRatio * sectionCount))
-      );
-      const aspectRatio = Number((width / height).toFixed(4));
-
+    // Case 1: JPEG Stream (/DCTDecode)
+    if (isDct) {
       results.push({
-        id: `img-pdf-flate-${docId}-${results.length + 1}`,
-        label: `Extracted PDF Image ${results.length + 1} (${width}×${height}px)`,
-        caption: `Original PDF XObject image #${results.length + 1} extracted from ${fileName} at ${(
-          positionRatio * 100
-        ).toFixed(0)}% offset and re-injected with preserved ${aspectRatio}:1 aspect ratio.`,
+        id: `img-pdf-dct-${docId}-${results.length + 1}`,
+        label: `Embedded Figure ${results.length + 1} (${width}x${height}px)`,
+        caption: `Preserved original JPEG image #${results.length + 1} from ${fileName} (${width}x${height}px, ${aspectRatio}:1 ratio).`,
         sectionIndex: mappedSection,
         pageNumber: Math.max(1, Math.ceil(positionRatio * 2)),
         positionRatio,
-        dataUrl: encodeRgbaBufferToPngDataUrl(rgba, width, height),
-        mimeType: 'image/png',
+        dataUrl: `data:image/jpeg;base64,${streamSlice.toString('base64')}`,
+        mimeType: 'image/jpeg',
         width,
         height,
         aspectRatio,
       });
-    } catch {
-      // Ignore non-standard predictor streams and continue scanning
+      continue;
+    }
+
+    // Case 2: FlateDecode (zlib compressed pixel stream)
+    if (isFlate) {
+      try {
+        let inflated: Buffer;
+        try {
+          inflated = zlib.inflateSync(streamSlice);
+        } catch {
+          inflated = zlib.inflateRawSync(streamSlice);
+        }
+
+        const pixelCount = width * height;
+        const rgba = Buffer.alloc(pixelCount * 4);
+
+        if (inflated.length >= pixelCount * 3) {
+          for (let p = 0; p < pixelCount; p++) {
+            rgba[p * 4] = inflated[p * 3];
+            rgba[p * 4 + 1] = inflated[p * 3 + 1];
+            rgba[p * 4 + 2] = inflated[p * 3 + 2];
+            rgba[p * 4 + 3] = 255;
+          }
+        } else if (inflated.length >= pixelCount) {
+          for (let p = 0; p < pixelCount; p++) {
+            const v = inflated[p];
+            rgba[p * 4] = v;
+            rgba[p * 4 + 1] = v;
+            rgba[p * 4 + 2] = v;
+            rgba[p * 4 + 3] = 255;
+          }
+        } else {
+          continue;
+        }
+
+        results.push({
+          id: `img-pdf-flate-${docId}-${results.length + 1}`,
+          label: `Embedded Figure ${results.length + 1} (${width}x${height}px)`,
+          caption: `Preserved original image #${results.length + 1} from ${fileName} (${width}x${height}px, ${aspectRatio}:1 ratio).`,
+          sectionIndex: mappedSection,
+          pageNumber: Math.max(1, Math.ceil(positionRatio * 2)),
+          positionRatio,
+          dataUrl: encodeRgbaBufferToPngDataUrl(rgba, width, height),
+          mimeType: 'image/png',
+          width,
+          height,
+          aspectRatio,
+        });
+      } catch {
+        // Non-standard predictor stream ignored
+      }
+      continue;
+    }
+
+    // Case 3: Raw Uncompressed RGB / Grayscale pixel stream (e.g. from jsPDF or raw PDF writers)
+    const pixelCount = width * height;
+    if (streamSlice.length >= pixelCount * 3) {
+      try {
+        const rgba = Buffer.alloc(pixelCount * 4);
+        for (let p = 0; p < pixelCount; p++) {
+          rgba[p * 4] = streamSlice[p * 3];
+          rgba[p * 4 + 1] = streamSlice[p * 3 + 1];
+          rgba[p * 4 + 2] = streamSlice[p * 3 + 2];
+          rgba[p * 4 + 3] = 255;
+        }
+        results.push({
+          id: `img-pdf-raw-${docId}-${results.length + 1}`,
+          label: `Embedded Figure ${results.length + 1} (${width}x${height}px)`,
+          caption: `Preserved original image #${results.length + 1} from ${fileName} (${width}x${height}px, ${aspectRatio}:1 ratio).`,
+          sectionIndex: mappedSection,
+          pageNumber: Math.max(1, Math.ceil(positionRatio * 2)),
+          positionRatio,
+          dataUrl: encodeRgbaBufferToPngDataUrl(rgba, width, height),
+          mimeType: 'image/png',
+          width,
+          height,
+          aspectRatio,
+        });
+      } catch {
+        // Safe skip
+      }
     }
   }
 
@@ -553,117 +608,114 @@ export function extractEmbeddedImagesFromUpload(params: {
     }
   }
 
-  // 2. Scan raw binary buffer for embedded PNG streams, JPEG (/DCTDecode) streams, and PDF Flate XObjects
-  if (rawBuffer && rawBuffer.length > 64 && extractedWithOffset.length === 0) {
-    const scanBuf = rawBuffer.length > 8 * 1024 * 1024 ? rawBuffer.subarray(0, 8 * 1024 * 1024) : rawBuffer;
-
-    // 2a. PNG streams: 89 50 4E 47 0D 0A 1A 0A ... IEND
-    const pngSig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-    const pngEnd = Buffer.from([0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82]);
-    let offset = 0;
-    let pngChecks = 0;
-    while (offset < scanBuf.length && extractedWithOffset.length < 6 && pngChecks < 20) {
-      const start = scanBuf.indexOf(pngSig, offset);
-      if (start === -1) break;
-      pngChecks++;
-      const end = scanBuf.indexOf(pngEnd, start + pngSig.length);
-      if (end === -1 || end - start > 2 * 1024 * 1024) {
-        offset = start + pngSig.length;
-        continue;
-      }
-      const slice = scanBuf.subarray(start, end + pngEnd.length);
-      if (slice.length > 120) {
-        const dims = parsePngDimensions(slice);
-        const offsetRatio = Number((start / scanBuf.length).toFixed(4));
-        const mappedSection = Math.min(
-          safeSectionCount - 1,
-          Math.max(0, Math.floor(offsetRatio * safeSectionCount))
-        );
-        const figNum = extractedWithOffset.length + 1;
+  // 2. Direct PDF /Subtype /Image XObject extraction
+  if (rawBuffer && rawBuffer.length > 64) {
+    const isPdf = rawBuffer.subarray(0, 5).toString('latin1').startsWith('%PDF');
+    if (isPdf) {
+      const pdfImages = extractPdfImageXObjects(rawBuffer, docId, fileName, safeSectionCount);
+      for (const img of pdfImages) {
         extractedWithOffset.push({
-          offsetRatio,
-          image: {
-            id: `img-png-${docId}-${figNum}`,
-            label: `Extracted Document Figure ${figNum} (${dims.width}×${dims.height}px)`,
-            caption: `Original embedded PNG figure #${figNum} preserved from ${fileName} (Section #${mappedSection + 1}, ${dims.aspectRatio}:1 aspect ratio).`,
-            sectionIndex: mappedSection,
-            pageNumber: Math.max(1, Math.ceil(offsetRatio * 2)),
-            positionRatio: offsetRatio,
-            dataUrl: `data:image/png;base64,${slice.toString('base64')}`,
-            mimeType: 'image/png',
-            width: dims.width,
-            height: dims.height,
-            aspectRatio: dims.aspectRatio,
-          },
+          offsetRatio: img.positionRatio || 0,
+          image: img,
         });
       }
-      offset = end + pngEnd.length;
     }
 
-    // 2b. JPEG streams inside PDF (/DCTDecode): FF D8 FF ... FF D9
-    const jpgStart = Buffer.from([0xff, 0xd8, 0xff]);
-    const jpgEnd = Buffer.from([0xff, 0xd9]);
-    offset = 0;
-    let jpgChecks = 0;
-    while (offset < scanBuf.length && extractedWithOffset.length < 6 && jpgChecks < 25) {
-      const start = scanBuf.indexOf(jpgStart, offset);
-      if (start === -1) break;
-      jpgChecks++;
-      // Verify valid JPEG marker (E0..EF, DB, C0..C4, FE) at byte 3 to avoid random compressed bytes
-      const markerByte = scanBuf[start + 3];
-      if (
-        markerByte !== undefined &&
-        !((markerByte >= 0xe0 && markerByte <= 0xef) || markerByte === 0xdb || (markerByte >= 0xc0 && markerByte <= 0xc4) || markerByte === 0xfe)
-      ) {
-        offset = start + 3;
-        continue;
-      }
-      const end = scanBuf.indexOf(jpgEnd, start + 4);
-      if (end === -1) break;
-      const len = end + 2 - start;
-      if (len >= 512 && len <= 2 * 1024 * 1024) {
-        const slice = scanBuf.subarray(start, end + 2);
-        const dims = parseJpegDimensions(slice);
-        const offsetRatio = Number((start / scanBuf.length).toFixed(4));
-        const mappedSection = Math.min(
-          safeSectionCount - 1,
-          Math.max(0, Math.floor(offsetRatio * safeSectionCount))
-        );
-        const figNum = extractedWithOffset.length + 1;
-        extractedWithOffset.push({
-          offsetRatio,
-          image: {
-            id: `img-jpg-${docId}-${figNum}`,
-            label: `Extracted PDF Image ${figNum} (${dims.width}×${dims.height}px)`,
-            caption: `Original embedded JPEG image #${figNum} preserved from ${fileName} (Section #${mappedSection + 1}, ${dims.aspectRatio}:1 aspect ratio).`,
-            sectionIndex: mappedSection,
-            pageNumber: Math.max(1, Math.ceil(offsetRatio * 2)),
-            positionRatio: offsetRatio,
-            dataUrl: `data:image/jpeg;base64,${slice.toString('base64')}`,
-            mimeType: 'image/jpeg',
-            width: dims.width,
-            height: dims.height,
-            aspectRatio: dims.aspectRatio,
-          },
-        });
-      }
-      offset = end + 2;
-    }
-
-    // 2c. PDF /FlateDecode Image XObjects
+    // 2b. Secondary scan for raw standalone PNG and JPEG streams (e.g. DOCX or non-standard PDFs)
     if (extractedWithOffset.length === 0) {
-      const flateImages = extractPdfFlateImageXObjects(
-        scanBuf,
-        docId,
-        fileName,
-        safeSectionCount
-      );
-      flateImages.forEach((im) => {
-        extractedWithOffset.push({
-          offsetRatio: im.positionRatio || 0,
-          image: im,
-        });
-      });
+      const scanBuf = rawBuffer.length > 16 * 1024 * 1024 ? rawBuffer.subarray(0, 16 * 1024 * 1024) : rawBuffer;
+
+      // PNG streams: 89 50 4E 47 0D 0A 1A 0A ... IEND
+      const pngSig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      const pngEnd = Buffer.from([0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82]);
+      let offset = 0;
+      let pngChecks = 0;
+      while (offset < scanBuf.length && extractedWithOffset.length < 20 && pngChecks < 50) {
+        const start = scanBuf.indexOf(pngSig, offset);
+        if (start === -1) break;
+        pngChecks++;
+        const end = scanBuf.indexOf(pngEnd, start + pngSig.length);
+        if (end === -1 || end - start > 10 * 1024 * 1024) {
+          offset = start + pngSig.length;
+          continue;
+        }
+        const slice = scanBuf.subarray(start, end + pngEnd.length);
+        if (slice.length > 120) {
+          const dims = parsePngDimensions(slice);
+          const offsetRatio = Number((start / scanBuf.length).toFixed(4));
+          const mappedSection = Math.min(
+            safeSectionCount - 1,
+            Math.max(0, Math.floor(offsetRatio * safeSectionCount))
+          );
+          const figNum = extractedWithOffset.length + 1;
+          extractedWithOffset.push({
+            offsetRatio,
+            image: {
+              id: `img-png-${docId}-${figNum}`,
+              label: `Embedded Figure ${figNum} (${dims.width}x${dims.height}px)`,
+              caption: `Preserved original PNG figure #${figNum} from ${fileName} (Section #${mappedSection + 1}, ${dims.aspectRatio}:1 ratio).`,
+              sectionIndex: mappedSection,
+              pageNumber: Math.max(1, Math.ceil(offsetRatio * 2)),
+              positionRatio: offsetRatio,
+              dataUrl: `data:image/png;base64,${slice.toString('base64')}`,
+              mimeType: 'image/png',
+              width: dims.width,
+              height: dims.height,
+              aspectRatio: dims.aspectRatio,
+            },
+          });
+        }
+        offset = end + pngEnd.length;
+      }
+
+      // JPEG streams: FF D8 FF ... FF D9
+      const jpgStart = Buffer.from([0xff, 0xd8, 0xff]);
+      const jpgEnd = Buffer.from([0xff, 0xd9]);
+      offset = 0;
+      let jpgChecks = 0;
+      while (offset < scanBuf.length && extractedWithOffset.length < 20 && jpgChecks < 50) {
+        const start = scanBuf.indexOf(jpgStart, offset);
+        if (start === -1) break;
+        jpgChecks++;
+        const markerByte = scanBuf[start + 3];
+        if (
+          markerByte !== undefined &&
+          !((markerByte >= 0xe0 && markerByte <= 0xef) || markerByte === 0xdb || (markerByte >= 0xc0 && markerByte <= 0xc4) || markerByte === 0xfe)
+        ) {
+          offset = start + 3;
+          continue;
+        }
+        const end = scanBuf.indexOf(jpgEnd, start + 4);
+        if (end === -1) break;
+        const len = end + 2 - start;
+        if (len >= 256 && len <= 10 * 1024 * 1024) {
+          const slice = scanBuf.subarray(start, end + 2);
+          const dims = parseJpegDimensions(slice);
+          const offsetRatio = Number((start / scanBuf.length).toFixed(4));
+          const mappedSection = Math.min(
+            safeSectionCount - 1,
+            Math.max(0, Math.floor(offsetRatio * safeSectionCount))
+          );
+          const figNum = extractedWithOffset.length + 1;
+          extractedWithOffset.push({
+            offsetRatio,
+            image: {
+              id: `img-jpg-${docId}-${figNum}`,
+              label: `Embedded Figure ${figNum} (${dims.width}x${dims.height}px)`,
+              caption: `Preserved original JPEG image #${figNum} from ${fileName} (Section #${mappedSection + 1}, ${dims.aspectRatio}:1 ratio).`,
+              sectionIndex: mappedSection,
+              pageNumber: Math.max(1, Math.ceil(offsetRatio * 2)),
+              positionRatio: offsetRatio,
+              dataUrl: `data:image/jpeg;base64,${slice.toString('base64')}`,
+              mimeType: 'image/jpeg',
+              width: dims.width,
+              height: dims.height,
+              aspectRatio: dims.aspectRatio,
+            },
+          });
+        }
+        offset = end + 2;
+      }
     }
   }
 

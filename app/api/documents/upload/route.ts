@@ -44,13 +44,9 @@ export async function POST(req: NextRequest) {
       const rawBuffer = Buffer.from(arrayBuf);
 
       // Extract clean readable text from DOCX/PDF/XLSX binary streams
-      let extractedBinaryText = extractReadableTextFromBinaryBuffer(
-        rawBuffer,
-        validation.fileType
-      );
+      let extractedBinaryText: string | null = null;
 
-      // Dedicated PDF stream decompressor fallback
-      if ((!extractedBinaryText || extractedBinaryText.trim().length < 20) && validation.fileType === 'PDF') {
+      if (validation.fileType === 'PDF') {
         try {
           const pages = await extractPdfPageData(rawBuffer);
           const combined = pages.map((p) => p.rawText).filter(Boolean).join('\n\n');
@@ -58,8 +54,15 @@ export async function POST(req: NextRequest) {
             extractedBinaryText = combined;
           }
         } catch {
-          // Keep best effort
+          // Fall back to stream decompressor
         }
+      }
+
+      if (!extractedBinaryText || extractedBinaryText.trim().length < 20) {
+        extractedBinaryText = extractReadableTextFromBinaryBuffer(
+          rawBuffer,
+          validation.fileType
+        );
       }
 
       if (extractedBinaryText && extractedBinaryText.trim().length > 0) {
