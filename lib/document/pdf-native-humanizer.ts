@@ -22,10 +22,25 @@ import {jsPDF} from 'jspdf';
 import {humanizeTextChunk} from '@/lib/humanizer/client';
 import {extractEmbeddedImagesFromUpload} from '@/lib/document/image-utils';
 
+declare const __non_webpack_require__: any;
+
 /**
- * Polyfills DOMMatrix, ImageData, Path2D in Node.js for pdfjs-dist / pdf-parse
+ * Polyfills DOMMatrix, ImageData, Path2D, and process.getBuiltinModule in Node.js for pdfjs-dist / pdf-parse
  */
 export function ensureNodeDomPolyfills() {
+  if (typeof process !== 'undefined' && typeof (process as any).getBuiltinModule !== 'function') {
+    (process as any).getBuiltinModule = (name: string) => {
+      try {
+        const req =
+          typeof __non_webpack_require__ !== 'undefined'
+            ? __non_webpack_require__
+            : eval('require');
+        return req ? req(name) : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+  }
   if (typeof (globalThis as any).DOMMatrix === 'undefined') {
     (globalThis as any).DOMMatrix = class DOMMatrix {
       constructor() {
@@ -445,7 +460,33 @@ export async function extractPdfPageData(pdfBuffer: Buffer): Promise<PdfPageData
 
   // 1. Try PDFParse (handles complex subset fonts & object streams)
   try {
-    const {PDFParse} = await import('pdf-parse');
+    let PDFParse: any;
+    try {
+      const nativeRequire =
+        typeof __non_webpack_require__ !== 'undefined'
+          ? __non_webpack_require__
+          : eval('require');
+      if (nativeRequire) {
+        const mod = nativeRequire('pdf-parse');
+        PDFParse = mod.PDFParse || mod.default?.PDFParse || mod.default || mod;
+      }
+    } catch {
+      // fallback to dynamic import
+    }
+
+    if (!PDFParse) {
+      try {
+        const mod = await import('pdf-parse');
+        PDFParse = mod.PDFParse || (mod as any).default?.PDFParse || (mod as any).default || mod;
+      } catch {
+        // dynamic import fallback
+      }
+    }
+
+    if (!PDFParse) {
+      throw new Error('PDFParse class not found in pdf-parse module');
+    }
+
     let standardFontDataUrl: string | undefined;
     try {
       const fontPath = path.resolve(process.cwd(), 'node_modules/pdfjs-dist/standard_fonts/');
@@ -462,7 +503,9 @@ export async function extractPdfPageData(pdfBuffer: Buffer): Promise<PdfPageData
             data: new Uint8Array(pdfBuffer),
             standardFontDataUrl,
           }
-        : new Uint8Array(pdfBuffer)
+        : {
+            data: new Uint8Array(pdfBuffer),
+          }
     );
     const textResult = await parser.getText();
 
@@ -908,7 +951,7 @@ export async function rebuildPdfWithHumanizedText(params: {
         let cursorY = height - 52;
         const minCursorY = 44;
 
-        const paragraphs = humanizedText.split(/\n\s*\n|\n/);
+        const paragraphs = humanizedText.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
 
         for (let pIdx = 0; pIdx < paragraphs.length; pIdx++) {
           const rawPara = paragraphs[pIdx].trim();
@@ -1120,6 +1163,12 @@ export async function createCleanReconstructedPdf(params: {
   const renderedImageIds = new Set<string>();
 
   for (let pIdx = 0; pIdx < pagesToRender.length; pIdx++) {
+    if (pIdx > 0) {
+      pdf.addPage();
+      pageNumber++;
+      cursorY = 54;
+      drawHeaderAndFooter(pageNumber);
+    }
     const pageData = pagesToRender[pIdx];
     const textToDraw = pageData.humanizedText || pageData.originalText;
     const blocks = textToDraw.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
@@ -1374,20 +1423,20 @@ export async function runPdfHumanizationPipeline(params: {
   // ── 3. Rebuild PDF ────────────────────────────────────────────────────────
   let outputBuffer: Buffer;
   try {
-    outputBuffer = await rebuildPdfWithHumanizedText({
-      originalBuffer: pdfBuffer,
-      pageResults,
-      traceId,
-      jobId,
-      fileName,
-    });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : 'PDF rebuild failed';
     outputBuffer = await createCleanReconstructedPdf({
       pageResults,
       traceId,
       originalPageCount: pages.length,
       originalBuffer: pdfBuffer,
+      fileName,
+    });
+  } catch (err) {
+    console.warn('[PDF-Rebuild] Clean reconstruction failed, falling back to native stream overlay:', err);
+    outputBuffer = await rebuildPdfWithHumanizedText({
+      originalBuffer: pdfBuffer,
+      pageResults,
+      traceId,
+      jobId,
       fileName,
     });
   }

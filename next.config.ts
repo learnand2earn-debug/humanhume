@@ -2,6 +2,7 @@ import type {NextConfig} from 'next';
 import path from 'path';
 
 const nextConfig: NextConfig = {
+  serverExternalPackages: ['pdf-parse', 'pdfjs-dist', '@napi-rs/canvas'],
   outputFileTracingRoot: path.resolve(__dirname),
   reactStrictMode: true,
   eslint: {
@@ -23,7 +24,7 @@ const nextConfig: NextConfig = {
   },
   output: process.env.VERCEL ? undefined : 'standalone',
   transpilePackages: ['motion'],
-  webpack: (config, {dev}) => {
+  webpack: (config, {dev, isServer}) => {
     // HMR is disabled in AI Studio via DISABLE_HMR env var.
     // Do not modify—file watching is disabled to prevent flickering during agent edits.
     if (dev && process.env.DISABLE_HMR === 'true') {
