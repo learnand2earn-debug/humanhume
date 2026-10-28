@@ -1004,7 +1004,11 @@ export async function createCleanReconstructedPdf(params: {
     }
 
     const cardPadding = 10;
-    const captionText = sanitizeTextForPdfFont(customCaption || img.caption || img.label || '');
+    const cleanDefault =
+      img.caption && !img.caption.startsWith('Preserved original')
+        ? img.caption
+        : '';
+    const captionText = sanitizeTextForPdfFont(customCaption || cleanDefault);
     const hasCaption = Boolean(captionText);
     const captionHeight = hasCaption ? 20 : 0;
     const cardH = imgH + cardPadding * 2 + captionHeight;
@@ -1118,13 +1122,23 @@ export async function createCleanReconstructedPdf(params: {
       if (isHeading) {
         const text = sanitizeTextForPdfFont(block.replace(/^#+\s*/, ''));
 
-        // If this heading is a Figure caption or mentions Figure, render the matching image right above/with it
-        if (/^Figure\s+\d+/i.test(text)) {
-          const matchedImg =
-            images.find((im) => !renderedImageIds.has(im.id)) || images[0];
-          if (matchedImg && !renderedImageIds.has(matchedImg.id)) {
-            renderImageCard(matchedImg, text);
-            imageRenderedForThisPage = true;
+        // If this heading is a Figure caption or mentions Figure, render the matching image right with it
+        const figMatch = text.match(/^Figure\s+(\d+)/i);
+        if (figMatch) {
+          const figNum = parseInt(figMatch[1], 10);
+          const targetImg =
+            images[figNum - 1] && !renderedImageIds.has(images[figNum - 1].id)
+              ? images[figNum - 1]
+              : images.find((im) => !renderedImageIds.has(im.id));
+
+          if (targetImg && !renderedImageIds.has(targetImg.id)) {
+            renderImageCard(targetImg, text);
+            continue;
+          }
+        } else if (/^Figure[:.]?\s+/i.test(text)) {
+          const targetImg = images.find((im) => !renderedImageIds.has(im.id));
+          if (targetImg && !renderedImageIds.has(targetImg.id)) {
+            renderImageCard(targetImg, text);
             continue;
           }
         }
@@ -1148,15 +1162,6 @@ export async function createCleanReconstructedPdf(params: {
       ensureSpace(wrapped.length * 14.5 + 8);
       pdf.text(wrapped, isListItem ? marginX + 14 : marginX, cursorY);
       cursorY += wrapped.length * 14.5 + 8;
-
-      // Natural diagram placement: if page has an unrendered image and we just rendered the first paragraph
-      if (!imageRenderedForThisPage && pageImages.length > 0 && bIdx >= 1) {
-        const nextImg = pageImages.find((img) => !renderedImageIds.has(img.id));
-        if (nextImg) {
-          renderImageCard(nextImg);
-          imageRenderedForThisPage = true;
-        }
-      }
     }
 
     // Render any remaining section images assigned to this page

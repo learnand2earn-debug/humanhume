@@ -505,7 +505,7 @@ function extractPdfImageXObjects(
         results.push({
           id: `img-pdf-flate-${docId}-${results.length + 1}`,
           label: `Embedded Figure ${results.length + 1} (${width}x${height}px)`,
-          caption: `Preserved original image #${results.length + 1} from ${fileName} (${width}x${height}px, ${aspectRatio}:1 ratio).`,
+          caption: `Figure ${results.length + 1}`,
           sectionIndex: mappedSection,
           pageNumber: Math.max(1, Math.ceil(positionRatio * 2)),
           positionRatio,
@@ -535,7 +535,7 @@ function extractPdfImageXObjects(
         results.push({
           id: `img-pdf-raw-${docId}-${results.length + 1}`,
           label: `Embedded Figure ${results.length + 1} (${width}x${height}px)`,
-          caption: `Preserved original image #${results.length + 1} from ${fileName} (${width}x${height}px, ${aspectRatio}:1 ratio).`,
+          caption: `Figure ${results.length + 1}`,
           sectionIndex: mappedSection,
           pageNumber: Math.max(1, Math.ceil(positionRatio * 2)),
           positionRatio,
@@ -594,7 +594,7 @@ export function extractEmbeddedImagesFromUpload(params: {
         image: {
           id: `img-inline-${docId}-${idx}`,
           label: `Embedded Figure ${idx} (${dims.width}×${dims.height}px)`,
-          caption: `Preserved original image #${idx} kept at exact document section (#${mappedSection + 1}) and ${dims.aspectRatio}:1 aspect ratio.`,
+          caption: `Figure ${idx}`,
           sectionIndex: mappedSection,
           pageNumber: Math.max(1, Math.ceil(offsetRatio * 2)),
           positionRatio: offsetRatio,
