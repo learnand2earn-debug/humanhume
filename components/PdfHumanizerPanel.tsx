@@ -125,6 +125,44 @@ export default function PdfHumanizerPanel() {
 
   useEffect(() => () => stopPolling(), [stopPolling]);
 
+  // ── Download (Direct Blob + URL Fallback) ───────────────────────────────
+  const downloadPdfFile = useCallback((targetJob: PdfJob | null) => {
+    if (!targetJob) return;
+
+    // Direct Blob download from base64 (instant, zero server round-trip on Vercel)
+    if (targetJob.pdfBase64) {
+      try {
+        const byteCharacters = atob(targetJob.pdfBase64);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], {type: 'application/pdf'});
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = `Humanized_${targetJob.originalFileName || 'document.pdf'}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 1500);
+        return;
+      } catch {
+        // Fallback to standard URL below
+      }
+    }
+
+    if (!targetJob.downloadUrl && !targetJob.jobId) return;
+    const url = targetJob.downloadUrl || `/api/documents/pdf-humanize/${targetJob.jobId}/download`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Humanized_${targetJob.originalFileName || 'document.pdf'}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }, []);
+
   // ── Upload & Submit ────────────────────────────────────────────────────
   const uploadPdf = useCallback(
     async (file: File) => {
@@ -191,7 +229,7 @@ export default function PdfHumanizerPanel() {
         setIsUploading(false);
       }
     },
-    [intensity, startPolling]
+    [downloadPdfFile, intensity, startPolling]
   );
 
   // ── Drag & Drop ────────────────────────────────────────────────────────
@@ -225,44 +263,6 @@ export default function PdfHumanizerPanel() {
     },
     [uploadPdf]
   );
-
-  // ── Download (Direct Blob + URL Fallback) ───────────────────────────────
-  const downloadPdfFile = useCallback((targetJob: PdfJob | null) => {
-    if (!targetJob) return;
-
-    // Direct Blob download from base64 (instant, zero server round-trip on Vercel)
-    if (targetJob.pdfBase64) {
-      try {
-        const byteCharacters = atob(targetJob.pdfBase64);
-        const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-          byteNumbers[i] = byteCharacters.charCodeAt(i);
-        }
-        const byteArray = new Uint8Array(byteNumbers);
-        const blob = new Blob([byteArray], {type: 'application/pdf'});
-        const blobUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = blobUrl;
-        a.download = `Humanized_${targetJob.originalFileName || 'document.pdf'}`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 1500);
-        return;
-      } catch {
-        // Fallback to standard URL below
-      }
-    }
-
-    if (!targetJob.downloadUrl && !targetJob.jobId) return;
-    const url = targetJob.downloadUrl || `/api/documents/pdf-humanize/${targetJob.jobId}/download`;
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Humanized_${targetJob.originalFileName || 'document.pdf'}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  }, []);
 
   const triggerDownload = useCallback(() => {
     downloadPdfFile(job);

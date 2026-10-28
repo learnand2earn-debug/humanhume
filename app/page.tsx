@@ -57,7 +57,21 @@ const PIPELINE_TIMELINE_STEPS = [
 export default function HumanFlowPlatformPage() {
   const [activeNav, setActiveNav] = useState<
     'workspace' | 'studio' | 'documents' | 'notifications' | 'admin' | 'help' | 'pdf-humanize'
-  >('pdf-humanize');
+  >(() => {
+    if (typeof window !== 'undefined') {
+      const searchParams = new URLSearchParams(window.location.search);
+      const tabParam = searchParams.get('tab');
+      const hash = window.location.hash.replace('#', '');
+      const target = tabParam || hash;
+      if (
+        target &&
+        ['workspace', 'studio', 'documents', 'notifications', 'admin', 'help', 'pdf-humanize'].includes(target)
+      ) {
+        return target as 'workspace' | 'studio' | 'documents' | 'notifications' | 'admin' | 'help' | 'pdf-humanize';
+      }
+    }
+    return 'pdf-humanize';
+  });
 
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [selectedDoc, setSelectedDoc] = useState<DocumentRecord | null>(null);
@@ -230,7 +244,7 @@ export default function HumanFlowPlatformPage() {
   useEffect(() => {
     let active = true;
 
-    if (typeof window !== 'undefined') {
+    const handleLocationChange = () => {
       const searchParams = new URLSearchParams(window.location.search);
       const tabParam = searchParams.get('tab');
       const hash = window.location.hash.replace('#', '');
@@ -241,7 +255,10 @@ export default function HumanFlowPlatformPage() {
       ) {
         setActiveNav(target as typeof activeNav);
       }
-    }
+    };
+
+    window.addEventListener('popstate', handleLocationChange);
+    window.addEventListener('hashchange', handleLocationChange);
 
     fetch('/api/documents')
       .then((res) =>
@@ -275,6 +292,8 @@ export default function HumanFlowPlatformPage() {
       .catch(() => {});
     return () => {
       active = false;
+      window.removeEventListener('popstate', handleLocationChange);
+      window.removeEventListener('hashchange', handleLocationChange);
     };
   }, []);
 
