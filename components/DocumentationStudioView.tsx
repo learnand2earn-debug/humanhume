@@ -721,7 +721,7 @@ export default function DocumentationStudioView({
                       Humanized Version (v2 Humanized — Processed via {v2HumanizedVersion?.provider || 'HumanFlow Engine'})
                     </span>
                     <span className="font-mono tabular-nums">
-                      AI Score: {v2HumanizedVersion?.checkerScore ?? 6}% · Preservation: 100%
+                      AI Score: {v2HumanizedVersion?.checkerScore ?? 6}% · Preservation: {v2HumanizedVersion?.preservationScore ?? activeDoc.preservationResult.preservationScore}%
                     </span>
                   </div>
                   <pre className="text-sm text-slate-200 whitespace-pre-wrap font-sans leading-relaxed max-w-[72ch]">
@@ -794,7 +794,7 @@ export default function DocumentationStudioView({
                       Visual Comparison: v1 Draft vs v4 Final (Conservative Legal Clause Protection Active)
                     </span>
                     <span className="font-mono text-emerald-400">
-                      Obligation & Entity Preservation: 100%
+                      Obligation & Entity Preservation: {activeDoc.preservationResult.preservationScore}%
                     </span>
                   </div>
                   <div className="text-sm text-slate-200 leading-relaxed whitespace-pre-wrap font-sans bg-slate-950 border border-slate-800 rounded-lg p-5">
@@ -871,7 +871,8 @@ export default function DocumentationStudioView({
                       },
                       {
                         title: 'Legal Obligation Preservation',
-                        detail: '100% of defined terms, monetary caps, notice periods, and dates match the initial validated draft.',
+                        detail: `${activeDoc.preservationResult.preservationScore}% of defined terms, monetary caps, notice periods, and dates match the initial validated draft (${activeDoc.protectedMap.entities.length} locked entities)`,
+                        
                       },
                     ].map((check, i) => (
                       <div

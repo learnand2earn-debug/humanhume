@@ -886,6 +886,7 @@ function resolveDbPath(): string {
 }
 const ACTIVE_DB_FILE_PATH = resolveDbPath();
 let storageDirInitialized = false;
+let writeQueue: Promise<void> = Promise.resolve();
 
 function loadState(): DatabaseState {
   if (globalForDb.__humanFlowStateV4) {
@@ -919,19 +920,40 @@ function persistState(state: DatabaseState) {
   }
   globalForDb.__humanFlowPersistTimer = setTimeout(() => {
     globalForDb.__humanFlowPersistTimer = null;
+    let serialized: string;
     try {
-      if (!storageDirInitialized) {
-        storageDirInitialized = true;
-        const dir = path.dirname(ACTIVE_DB_FILE_PATH);
-        if (!fs.existsSync(dir)) {
-          fs.mkdirSync(dir, {recursive: true});
-        }
-      }
-      const serialized = JSON.stringify(state, null, 2);
-      void fs.promises.writeFile(ACTIVE_DB_FILE_PATH, serialized, 'utf-8').catch(() => {});
+      serialized = JSON.stringify(state);
     } catch {
-      // Kept in memory if filesystem is read-only
+      return; // Kept in memory if the state cannot be serialized
     }
+    // One write at a time, and never into the live file: overlapping writeFile
+    // calls truncate each other on Windows and can leave an empty database.
+    writeQueue = writeQueue.then(async () => {
+      const tmpPath = `${ACTIVE_DB_FILE_PATH}.${process.pid}.tmp`;
+      try {
+        if (!storageDirInitialized) {
+          storageDirInitialized = true;
+          const dir = path.dirname(ACTIVE_DB_FILE_PATH);
+          if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, {recursive: true});
+          }
+          // A server killed mid-write leaves its snapshot behind under this exact
+          // name; only this process is writing now, so any other pid is dead.
+          const prefix = `${path.basename(ACTIVE_DB_FILE_PATH)}.`;
+          for (const entry of fs.readdirSync(dir)) {
+            const pid = /^(\d+)\.tmp$/.exec(entry.slice(prefix.length))?.[1];
+            if (entry.startsWith(prefix) && pid && Number(pid) !== process.pid) {
+              void fs.promises.unlink(path.join(dir, entry)).catch(() => {});
+            }
+          }
+        }
+        await fs.promises.writeFile(tmpPath, serialized, 'utf-8');
+        await fs.promises.rename(tmpPath, ACTIVE_DB_FILE_PATH);
+      } catch {
+        // Kept in memory if the filesystem is read-only
+        await fs.promises.unlink(tmpPath).catch(() => {});
+      }
+    });
   }, 120);
 }
 

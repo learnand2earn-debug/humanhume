@@ -106,7 +106,7 @@ export default function HumanFlowPlatformPage() {
 
   // Multi-Document Batch Selection & ZIP Export State
   const [selectedDocIdsForZip, setSelectedDocIdsForZip] = useState<string[]>([]);
-  const [zipExportFormat, setZipExportFormat] = useState<'pdf' | 'docx' | 'txt' | 'md'>('pdf');
+  const [zipExportFormat, setZipExportFormat] = useState<'native' | 'pdf' | 'docx' | 'txt' | 'md'>('native');
   const [includeZipReports, setIncludeZipReports] = useState<boolean>(true);
   const [isExportingZip, setIsExportingZip] = useState<boolean>(false);
 
@@ -389,7 +389,7 @@ export default function HumanFlowPlatformPage() {
         step: 'QUALITY_CHECK',
         level: 'INFO',
         commandOrModule: 'checker::stylometricScan',
-        message: `Running stylometric AI detection check and 100% factual & figure preservation verification...`,
+        message: `Running stylometric AI detection check and factual & figure preservation verification...`,
       },
     ];
 
@@ -429,13 +429,9 @@ export default function HumanFlowPlatformPage() {
 
     try {
       const formData = new FormData();
-      // Bound multipart transfer to 1.5 MB so reverse proxies never return an HTML 413 Payload Too Large page
-      const maxTransferBytes = 1572864;
-      const uploadBlob =
-        file.size > maxTransferBytes
-          ? new File([file.slice(0, maxTransferBytes, file.type)], file.name, {type: file.type})
-          : file;
-      formData.append('file', uploadBlob);
+      // The complete file is sent. Editing happens inside the uploaded container,
+      // so a truncated upload would only produce a broken document.
+      formData.append('file', file);
       formData.append('originalFileName', file.name);
       formData.append('originalFileSize', String(file.size));
 
@@ -450,16 +446,18 @@ export default function HumanFlowPlatformPage() {
         error?: string;
       }>(res, {});
 
-      // Automatic fallback if reverse proxy returned HTML (e.g. 413/502/504) on multipart body
-      if (parsed.isHtml || (!parsed.ok && !parsed.data.error)) {
-        const sliceText = await file.slice(0, 65536).text().catch(() => '');
+      // Plain text has no binary container to preserve, so a JSON body is a safe fallback
+      // when a reverse proxy rejects the multipart form.
+      const isPlainText = /\.(txt|md|markdown)$/i.test(file.name) || file.type.startsWith('text/');
+      if ((parsed.isHtml || (!parsed.ok && !parsed.data.error)) && isPlainText) {
+        const fullText = await file.text().catch(() => '');
         const fallbackRes = await fetch('/api/documents/upload', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
             fileName: file.name,
             fileSize: file.size,
-            content: sliceText,
+            content: fullText,
           }),
         });
         parsed = await parseResponseJsonSafely<{
@@ -473,9 +471,11 @@ export default function HumanFlowPlatformPage() {
 
       if (!parsed.ok || !parsed.data.document) {
         setUploadError(
-          parsed.data.error ||
-            parsed.errorMessage ||
-            'File validation failed. Original file untouched.'
+          res.status === 413
+            ? `The server rejected this ${(file.size / 1048576).toFixed(1)} MB upload (HTTP 413), so nothing was processed. Partial uploads are refused on purpose: a cut-off PDF or DOCX cannot be edited in place.`
+            : parsed.data.error ||
+              parsed.errorMessage ||
+              'File validation failed. Original file untouched.'
         );
         setIsProcessingUpload(false);
         return;
@@ -494,9 +494,16 @@ export default function HumanFlowPlatformPage() {
       ]);
       setSelectedDoc(uploadedDoc);
       void fetchAllPlatformData();
+      const nativeResult = uploadedDoc.nativeArtifact;
       triggerBrowserNotification(
-        'HumanFlow AI — Document Completed',
-        `${uploadedDoc.originalName} processed with 100% preservation.`
+        'HumanFlow AI — Document Processing Finished',
+        nativeResult
+          ? `${uploadedDoc.originalName}: ${nativeResult.changedUnits}/${nativeResult.totalUnits} text block(s) rewritten inside your original ${nativeResult.fileType}${
+              nativeResult.mediaChecked
+                ? `, ${nativeResult.imageCount} picture(s) verified byte-identical`
+                : ''
+            }.`
+          : `${uploadedDoc.originalName} processed. Open the preservation report to see what changed.`
       );
     } catch (err) {
       clearInterval(stepTimer);
@@ -832,7 +839,7 @@ In order to maintain SLA compliance across all regions, engineering teams utiliz
                       </span>
                     </h3>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      Upload any PDF — all pictures, diagrams, and figures stay 100% in place while every page is humanized.
+                      Upload any PDF — text is rewritten inside the uploaded file, so every picture, position and page stays exactly as you uploaded it.
                     </p>
                   </div>
                 </div>
@@ -1453,11 +1460,12 @@ In order to maintain SLA compliance across all regions, engineering teams utiliz
                     aria-label="ZIP export file format"
                     value={zipExportFormat}
                     onChange={(e) =>
-                      setZipExportFormat(e.target.value as 'pdf' | 'docx' | 'txt' | 'md')
+                      setZipExportFormat(e.target.value as 'native' | 'pdf' | 'docx' | 'txt' | 'md')
                     }
                     className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
                   >
-                    <option value="pdf">Format: Humanized PDF (With Images)</option>
+                    <option value="native">Format: Original file (text edited in place)</option>
+                    <option value="pdf">Format: PDF (your edited file, or generated from text)</option>
                     <option value="docx">Format: Humanized DOCX</option>
                     <option value="txt">Format: Humanized TXT</option>
                     <option value="md">Format: Humanized Markdown (.md)</option>
@@ -1904,7 +1912,7 @@ In order to maintain SLA compliance across all regions, engineering teams utiliz
                 <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
                   <ShieldCheck className="w-5 h-5 text-emerald-400" />
                   <h3 className="font-semibold text-slate-100">
-                    100% Protected-Content Guarantee
+                    Protected-Content Guardrail
                   </h3>
                   <p className="text-slate-400 leading-relaxed">
                     Before humanization, the Document Analysis Agent indexes headings, tables, numbers, percentages, currencies, dates, URLs, emails, citations, and defined legal terms. If any critical entity drifts, the Preservation Agent automatically restores that section from the untouched original.

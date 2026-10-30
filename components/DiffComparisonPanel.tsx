@@ -31,7 +31,9 @@ export default function DiffComparisonPanel({
   const [selectedVersionId, setSelectedVersionId] = useState<string>(
     document.versions[document.versions.length - 1]?.id || ''
   );
-  const [exportFormat, setExportFormat] = useState<'pdf' | 'docx' | 'txt' | 'md'>('pdf');
+  const [exportFormat, setExportFormat] = useState<'native' | 'pdf' | 'docx' | 'txt' | 'md'>(
+    document.nativeArtifact ? 'native' : 'pdf'
+  );
   const [previewLayoutMode, setPreviewLayoutMode] = useState<'pdf_page' | 'diff'>('pdf_page');
   const [showProtectedBadges, setShowProtectedBadges] = useState(true);
   const [isReprocessing, setIsReprocessing] = useState(false);
@@ -67,7 +69,7 @@ export default function DiffComparisonPanel({
 
   const handleDownload = (
     target: 'original' | 'draft' | 'best' | 'final' | 'report',
-    overrideFormat?: 'pdf' | 'docx' | 'txt' | 'md'
+    overrideFormat?: 'native' | 'pdf' | 'docx' | 'txt' | 'md'
   ) => {
     const fmt = overrideFormat || exportFormat;
     const url = `/api/documents/${document.id}/download?target=${target}&format=${fmt}`;
@@ -105,7 +107,7 @@ export default function DiffComparisonPanel({
         const newImg: EmbeddedDocumentImage = {
           id: `img-user-${Date.now()}`,
           label: `Figure ${embeddedImages.length + 1} — ${file.name.replace(/\.[^.]+$/, '')} (${dims.width}×${dims.height}px)`,
-          caption: `Preserved embedded figure (${file.name}) re-injected at Section #${targetSec + 1} with original ${aspectRatio.toFixed(2)}:1 aspect ratio.`,
+          caption: `Your added figure (${file.name}) placed at Section #${targetSec + 1} with its original ${aspectRatio.toFixed(2)}:1 aspect ratio.`,
           sectionIndex: targetSec,
           pageNumber: 1,
           positionRatio: Number(((targetSec + 0.5) / Math.max(1, document.chunks.length)).toFixed(2)),
@@ -232,7 +234,7 @@ export default function DiffComparisonPanel({
           <div className="rounded border border-slate-200 bg-white overflow-hidden flex items-center justify-center p-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={img.dataUrl}
+              src={img.previewUrl || img.dataUrl}
               alt={img.label}
               style={{aspectRatio: `${img.width || 560} / ${img.height || 220}`}}
               className="w-auto max-w-full max-h-52 object-contain mx-auto"
@@ -310,7 +312,13 @@ export default function DiffComparisonPanel({
         {/* Bottom PDF Verification Stamp */}
         <div className="pt-4 mt-6 border-t border-slate-200 flex items-center justify-between text-[11px] text-emerald-700 font-semibold">
           <span>
-            VERIFIED BY HUMANFLOW AI · 100% Meaning & Image Layout Preserved
+            {document.nativeArtifact
+              ? `EDITED INSIDE YOUR ORIGINAL ${document.nativeArtifact.fileType} · ${
+                  document.nativeArtifact.mediaChecked
+                    ? `${document.nativeArtifact.imageCount} picture(s) verified byte-identical`
+                    : 'this format has no separate picture streams'
+                }`
+              : 'VERIFIED BY HUMANFLOW AI · text-only export: this sheet is regenerated from your words, so it is not your original file'}
           </span>
           <span className="font-mono">AI Score: {activeVersion?.checkerScore ?? 6}%</span>
         </div>
@@ -417,13 +425,27 @@ export default function DiffComparisonPanel({
           <select
             aria-label="Export file format"
             value={exportFormat}
-            onChange={(e) => setExportFormat(e.target.value as 'pdf' | 'docx' | 'txt' | 'md')}
+            onChange={(e) =>
+              setExportFormat(e.target.value as 'native' | 'pdf' | 'docx' | 'txt' | 'md')
+            }
             className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
           >
-            <option value="pdf">Format: PDF (With Images)</option>
-            <option value="docx">Format: DOCX</option>
-            <option value="txt">Format: TXT</option>
-            <option value="md">Format: Markdown (.md)</option>
+            {document.nativeArtifact ? (
+              <>
+                <option value="native">
+                  Format: Original {document.nativeArtifact.fileType} (edited in place)
+                </option>
+                <option value="txt">Format: TXT (text only)</option>
+                <option value="md">Format: Markdown (.md) (text only)</option>
+              </>
+            ) : (
+              <>
+                <option value="pdf">Format: PDF (generated from your text)</option>
+                <option value="docx">Format: DOCX</option>
+                <option value="txt">Format: TXT</option>
+                <option value="md">Format: Markdown (.md)</option>
+              </>
+            )}
           </select>
 
           <button
@@ -435,14 +457,16 @@ export default function DiffComparisonPanel({
           </button>
 
           <button
-            onClick={() => handleDownload('final', 'pdf')}
+            onClick={() => handleDownload('final', document.nativeArtifact ? 'native' : 'pdf')}
             className="px-4 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 shadow-xs"
           >
             <Download className="w-3.5 h-3.5" />
-            Download Humanized PDF (With Images)
+            {document.nativeArtifact
+              ? `Download Humanized ${document.nativeArtifact.fileType} (${document.nativeArtifact.changedUnits}/${document.nativeArtifact.totalUnits} blocks edited in place)`
+              : 'Download generated PDF (from your humanized text)'}
           </button>
 
-          {exportFormat !== 'pdf' && (
+          {exportFormat !== (document.nativeArtifact ? 'native' : 'pdf') && (
             <button
               onClick={() => handleDownload('final', exportFormat)}
               className="px-3 py-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5"
@@ -478,13 +502,17 @@ export default function DiffComparisonPanel({
           <div>
             <h3 className="text-base font-semibold text-slate-100 font-display">
               {previewLayoutMode === 'pdf_page'
-                ? 'Side-by-Side PDF Document Preview (Humanized Text + Preserved Original Images)'
+                ? document.nativeArtifact
+                  ? 'Side-by-Side Preview (Humanized Text Inside Your Original File)'
+                  : 'Side-by-Side Preview (Humanized Text in a Generated Sheet)'
                 : 'Visual Word-Level Diff & Protected-Content Comparison'}
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
               {previewLayoutMode === 'pdf_page'
-                ? 'Exact visual preview of your PDF output: all prose is humanized while every figure/image stays in its original position.'
-                : `Side-by-side comparison of Untouched Original vs ${activeVersion?.versionLabel || 'Final'} with locked entities highlighted`}
+                ? document.nativeArtifact
+                  ? 'Your own file with its wording rewritten in place: every picture, its position and the page design stay exactly as you uploaded them.'
+                  : 'This document has no in-place edit, so the right-hand sheet is generated from the humanized text — download your original file to keep its pictures untouched.'
+                  : `Side-by-side comparison of Untouched Original vs ${activeVersion?.versionLabel || 'Final'} with locked entities highlighted`}
             </p>
           </div>
 
@@ -549,7 +577,9 @@ export default function DiffComparisonPanel({
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs text-slate-400 px-1">
                 <span className="font-semibold text-emerald-400">
-                  HUMANIZED PDF OUTPUT (100% Humanized Text + Original Images Intact)
+                  {document.nativeArtifact
+                    ? `YOUR ${document.nativeArtifact.fileType} WITH HUMANIZED TEXT (PICTURES, POSITIONS AND PAGES UNTOUCHED)`
+                    : 'GENERATED PDF FROM HUMANIZED TEXT (NOT YOUR ORIGINAL FILE — THIS DOCUMENT WAS NOT EDITED IN PLACE)'}
                 </span>
                 <span className="font-mono text-emerald-400">
                   AI Score: {activeVersion?.checkerScore ?? 6}% · Ready for PDF Download
@@ -721,7 +751,13 @@ export default function DiffComparisonPanel({
                       Intensity: {chunk.intensity} {chunk.isLegalClause ? '(Legal Clause Protection)' : ''}
                     </span>
                     <span>·</span>
-                    <span className="text-emerald-400">Preservation 100%</span>
+                    <span className={chunk.status === 'HUMANIZED' ? 'text-emerald-400' : 'text-amber-400'}>
+                      {chunk.status === 'HUMANIZED'
+                        ? document.nativeArtifact
+                          ? 'Rewritten in place'
+                          : 'Humanized'
+                        : 'Kept original wording'}
+                    </span>
                   </div>
                   <p className="text-xs text-slate-300 line-clamp-2 font-sans">
                     {chunk.restoredText}

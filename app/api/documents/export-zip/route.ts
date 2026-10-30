@@ -1,5 +1,6 @@
 import {NextRequest, NextResponse} from 'next/server';
 import {getDocumentById} from '@/lib/db/store';
+import {readBinaryFromPrivateStorage} from '@/lib/storage';
 import {
   generatePreservationAuditReportPdf,
   generateRealPdfBinary,
@@ -61,10 +62,33 @@ export async function POST(req: NextRequest) {
       const baseName = doc.originalName
         .replace(/\.[^.]+$/, '')
         .replace(/[^a-zA-Z0-9._-]/g, '_');
-      const ext = ['pdf', 'docx', 'txt', 'md'].includes(format) ? format : 'pdf';
-      const finalFileName = ensureUniqueFileName(`Final_Humanized_${baseName}.${ext}`);
+      const rawExt = (doc.originalName.split('.').pop() || '').toLowerCase();
+      const sourceExt = ['pdf', 'docx', 'xlsx', 'rtf', 'txt', 'md'].includes(rawExt)
+        ? rawExt
+        : doc.fileType.toLowerCase();
+      const wantsText = format === 'txt' || format === 'md';
+      const ext = wantsText ? format : ['pdf', 'docx', 'txt', 'md'].includes(format) ? format : 'pdf';
+      const finalFileName = ensureUniqueFileName(
+        wantsText ? `Final_Humanized_${baseName}.${ext}` : `Final_Humanized_${baseName}.${sourceExt}`
+      );
 
-      if (ext === 'pdf') {
+      const nativeBytes =
+        !wantsText && doc.nativeArtifact?.layoutMode === 'IN_PLACE'
+          ? readBinaryFromPrivateStorage(doc.nativeArtifact.filePath)
+          : null;
+
+      if (nativeBytes && nativeBytes.length > 0) {
+        // The uploaded container with its text replaced: pictures and layout are the originals.
+        zipEntries.push({fileName: finalFileName, content: nativeBytes});
+      } else if (doc.nativeArtifact?.layoutMode === 'IN_PLACE') {
+        zipEntries.push({
+          fileName: ensureUniqueFileName(`Final_Humanized_${baseName}.txt`),
+          content: Buffer.from(
+            `${doc.finalContent}\n\nNOTE: the in-place ${sourceExt.toUpperCase()} bytes are not held by this server instance any more, so only the humanized text could be exported. No regenerated PDF is included, because that would replace your original pictures.\n`,
+            'utf-8'
+          ),
+        });
+      } else if (ext === 'pdf') {
         const pdfBuffer = generateRealPdfBinary({
           docRecord: doc,
           bodyText: doc.finalContent,
@@ -83,6 +107,7 @@ export async function POST(req: NextRequest) {
       }
 
       const latestCheck = doc.qualityChecks[doc.qualityChecks.length - 1];
+      const native = doc.nativeArtifact;
       manifestLines.push(
         `--------------------------------------------------------------------`,
         `Document:               ${doc.originalName}`,
@@ -90,8 +115,14 @@ export async function POST(req: NextRequest) {
         `Trace ID:               ${doc.traceId}`,
         `Module:                 ${doc.sourceModule}`,
         `Status:                 ${doc.status}`,
+        `Processing Mode:        ${native ? 'In-place edit of the uploaded file (no rebuild)' : 'Text pipeline export'}`,
+        `Text Blocks Rewritten:  ${native ? `${native.changedUnits}/${native.totalUnits}` : `${doc.chunks.length} chunk(s)`}`,
         `Preservation Score:     ${doc.preservationResult.preservationScore}% (${doc.protectedMap.entities.length} locked entities)`,
-        `Embedded Images:        ${(doc.embeddedImages || []).length} figure(s) preserved`,
+        `Picture Objects:        ${
+          native
+            ? `${native.imageCount} copied unchanged${native.mediaChecked ? (native.mediaIdentical ? ' (verified byte-identical)' : ' (VERIFICATION FAILED)') : ' (this format has no separate picture streams)'}`
+            : `${(doc.embeddedImages || []).length} figure(s) re-injected from extraction`
+        }`,
         `AI Detection Score:     ${latestCheck?.aiScore ?? 6}% (${latestCheck?.status ?? 'PASS'})`,
         `Readability Score:      ${doc.preservationResult.readabilityScore}%`,
         ``

@@ -130,19 +130,28 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Return job status, download URL, AND direct base64 for instant zero-roundtrip client download
+    // The PDF itself is served by the download URL: inlining it here would put a
+    // copy of the whole file (plus 4/3 of it again in base64) into every response.
     return NextResponse.json({
       success: true,
       jobId,
       traceId,
       status: job.status,
+      layoutMode: job.layoutMode,
       totalPages: job.totalPages,
       processedPages: job.processedPages,
       failedPages: job.failedPages,
       progressPercent: job.progressPercent,
       downloadUrl: `/api/documents/pdf-humanize/${jobId}/download`,
-      pdfBase64: job.outputBuffer ? job.outputBuffer.toString('base64') : undefined,
       completedAt: job.completedAt,
+      humanizedUnits: job.humanizedUnits,
+      totalUnits: job.totalUnits,
+      revertedUnits: job.revertedUnits,
+      preservedImages: job.preservedImages,
+      mediaIdentical: job.mediaIdentical,
+      mediaChecked: job.mediaChecked,
+      providers: job.providers,
+      preservationNotes: job.preservationNotes,
       pageResults: job.pageResults.map((r) => ({
         pageNumber: r.pageNumber,
         status: r.status,

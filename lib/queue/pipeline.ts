@@ -17,7 +17,18 @@ import {
   upsertProcessingJob,
 } from '@/lib/db/store';
 import {generateTraceId} from '@/lib/security';
-import {saveToPrivateStorage, verifyStorageFileExists} from '@/lib/storage';
+import {
+  readBinaryFromPrivateStorage,
+  saveBinaryToPrivateStorage,
+  saveToPrivateStorage,
+  verifyStorageFileExists,
+} from '@/lib/storage';
+import {
+  executeNativeDocumentPipeline,
+  rewriteNativeDocumentFromBytes,
+  supportsInPlaceEditing,
+} from '@/lib/queue/native-pipeline';
+import {compareMediaPreservation} from '@/lib/document/native-verify';
 import {
   analyzeAndCreateProtectedMap,
   extractTextFromUploadedBuffer,
@@ -47,6 +58,18 @@ export async function executeAutonomousDocumentPipeline(params: {
   rawBuffer?: Buffer;
   existingDocId?: string;
 }): Promise<DocumentRecord> {
+  // Containers we can edit in place keep their own bytes: images, fonts and
+  // layout are never re-generated, so this branch takes the upload wholesale.
+  if (params.rawBuffer && params.rawBuffer.length > 0 && supportsInPlaceEditing(params.fileName, params.fileType)) {
+    return executeNativeDocumentPipeline({
+      fileName: params.fileName,
+      fileType: params.fileType,
+      fileSize: params.fileSize,
+      rawBuffer: params.rawBuffer,
+      existingDocId: params.existingDocId,
+    });
+  }
+
   const startTime = Date.now();
   const state = getDbState();
   const maxRetries = state.settings.maxRetries || 3;
@@ -89,18 +112,18 @@ export async function executeAutonomousDocumentPipeline(params: {
   );
 
   // 1. Store untouched Original file in private storage
-  const originalStoragePath = saveToPrivateStorage(
-    'original',
-    docId,
-    params.fileName,
-    params.rawContent
-  );
+  const originalStoragePath =
+    params.rawBuffer && params.rawBuffer.length > 0
+      ? saveBinaryToPrivateStorage('original', docId, params.fileName, params.rawBuffer)
+      : saveToPrivateStorage('original', docId, params.fileName, params.rawContent);
 
   emitConsoleLog(
     'UPLOAD',
     'SUCCESS',
     'storage::lockOriginal',
-    `Original file isolated & read-only locked at ${originalStoragePath} (SHA-256 verified)`
+    `Original file isolated & read-only locked at ${originalStoragePath} (${
+      params.rawBuffer && params.rawBuffer.length > 0 ? `${params.rawBuffer.length} raw bytes` : 'text payload'
+    })`
   );
 
   emitConsoleLog(
@@ -389,17 +412,20 @@ export async function executeAutonomousDocumentPipeline(params: {
   versions.push(finalVersion);
 
   // 6. Execute 10-Point Quality Control Verification before marking COMPLETED
+  const missingHeadings = protectedMap.headings
+    .map((h) => h.replace(/^#{1,6}\s+/, '').trim())
+    .filter((h) => h.length > 2 && !winningVersion.content.includes(h));
   const qcChecklist = {
     fileOpensCorrectly: winningVersion.content.trim().length > 0,
     originalStillExists: verifyStorageFileExists(originalStoragePath),
     allRequiredSectionsExist: currentChunks.length >= initialChunks.length,
     noImportantInfoLost: latestPreservation.missingParagraphs === 0,
     noProtectedContentChanged: latestPreservation.preservationScore === 100,
-    formattingAcceptable: true,
+    formattingAcceptable: missingHeadings.length === 0,
     humanizerResponseValid: winningVersion.content.trim().length > 0,
     checkerCompleted: qualityChecks.length > 0,
     finalVersionGenerated: verifyStorageFileExists(finalFilePath),
-    downloadWorks: true,
+    downloadWorks: verifyStorageFileExists(finalFilePath),
   };
 
   const allQcPassed = Object.values(qcChecklist).every(Boolean);
@@ -413,11 +439,15 @@ export async function executeAutonomousDocumentPipeline(params: {
 
   const totalDurationMs = Date.now() - startTime;
 
+  const passedChecks = Object.values(qcChecklist).filter(Boolean).length;
+
   emitConsoleLog(
     'FINALIZE',
-    'SUCCESS',
+    allQcPassed ? 'SUCCESS' : 'WARN',
     'exporter::finalizeOutput',
-    `10/10 QC checks passed. Final artifact stored at ${finalFilePath} with ${embeddedImages.length} preserved figure(s). Total pipeline time: ${totalDurationMs}ms`
+    `${passedChecks}/${Object.keys(qcChecklist).length} QC checks passed${
+      allQcPassed ? '' : ` (failed: ${Object.entries(qcChecklist).filter(([, v]) => !v).map(([k]) => k).join(', ')})`
+    }. Final artifact stored at ${finalFilePath} with ${embeddedImages.length} preserved figure(s). Total pipeline time: ${totalDurationMs}ms`
   );
 
   const finalRecord: DocumentRecord = {
@@ -877,6 +907,114 @@ export async function regenerateSingleDocumentSection(params: {
 
   const chunk = doc.chunks[params.sectionIndex];
   if (!chunk) return doc;
+
+  // In-place documents: rewrite that one block inside the uploaded container.
+  const nativeArtifact = doc.nativeArtifact;
+  const originalBytes = nativeArtifact ? readBinaryFromPrivateStorage(nativeArtifact.originalFilePath) : null;
+  if (nativeArtifact && originalBytes && originalBytes.length > 0) {
+    const sectionStart = Date.now();
+    const humRes = await humanizeTextChunk({
+      text: chunk.originalText,
+      intensity: chunk.intensity,
+      isLegalClause: chunk.isLegalClause,
+      protectedTokens: chunk.protectedEntities.map((e) => e.originalValue),
+      traceId: doc.traceId,
+    });
+
+    const unitMap = analyzeAndCreateProtectedMap(doc.id, chunk.originalText);
+    const droppedEntities = unitMap.entities
+      .filter((e) => chunk.originalText.includes(e.originalValue) && !humRes.humanizedText.includes(e.originalValue));
+    const candidate = droppedEntities.length > 0 ? chunk.originalText : humRes.humanizedText;
+
+    const replacements = doc.chunks.map((c) => c.restoredText || c.humanizedText || c.originalText);
+    replacements[params.sectionIndex] = candidate;
+
+    const applied = await rewriteNativeDocumentFromBytes({
+      originalBytes,
+      fileType: nativeArtifact.fileType,
+      replacements,
+    });
+    const writtenText = applied.texts[params.sectionIndex] ?? candidate;
+    const refusedByLayout = writtenText !== candidate;
+
+    const media = await compareMediaPreservation(originalBytes, applied.buffer, nativeArtifact.fileType);
+    const artifactPath = saveBinaryToPrivateStorage('final', doc.id, `Final_${doc.originalName}`, applied.buffer);
+    const reconstructed = doc.chunks
+      .map((c, i) => (i === params.sectionIndex ? writtenText : c.restoredText || c.originalText))
+      .join('\n\n');
+
+    doc.chunks = doc.chunks.map((c, i) =>
+      i === params.sectionIndex
+        ? {
+            ...c,
+            humanizedText: writtenText,
+            restoredText: writtenText,
+            status: writtenText === c.originalText ? ('RESTORED' as const) : ('HUMANIZED' as const),
+            fixReason: refusedByLayout
+              ? `Layout kept the previous wording: ${applied.warnings.slice(0, 2).join(' ') || 'the rewrite did not fit the original text slot'}`
+              : droppedEntities.length > 0
+                ? `Kept original wording: ${droppedEntities.map((e) => e.originalValue).join(', ')} would have changed`
+                : undefined,
+          }
+        : c
+    );
+    doc.finalContent = reconstructed;
+    doc.preservationResult = {
+      ...doc.preservationResult,
+      restorationLogs: [
+        ...doc.preservationResult.restorationLogs,
+        ...applied.warnings.map((w) => `Section #${params.sectionIndex + 1}: ${w}`),
+        ...media.notes.map((w) => `Section #${params.sectionIndex + 1}: ${w}`),
+      ],
+    };
+    doc.nativeArtifact = {
+      ...nativeArtifact,
+      filePath: artifactPath,
+      bytesOut: applied.buffer.length,
+      changedUnits: applied.changedUnits,
+      mediaChecked: media.checked,
+      mediaIdentical: media.identical,
+      providers: [...new Set([...nativeArtifact.providers, humRes.provider])],
+      notes: [...media.notes, ...applied.warnings],
+    };
+    doc.versions = [
+      ...doc.versions,
+      {
+        id: `ver-${doc.id}-inplace-${doc.versions.length + 1}`,
+        documentId: doc.id,
+        versionNumber: doc.versions.length + 1,
+        versionLabel: 'Final',
+        filePath: artifactPath,
+        content: reconstructed,
+        qualityScore: media.identical ? 98 : 40,
+        checkerScore: doc.qualityChecks[doc.qualityChecks.length - 1]?.aiScore ?? 0,
+        preservationScore: media.identical ? 100 : 0,
+        readabilityScore: doc.preservationResult.readabilityScore,
+        retryCount: doc.retryCount,
+        provider: humRes.provider,
+        processingDurationMs: Date.now() - sectionStart,
+        status: media.identical ? 'VALID' : 'NEEDS_REVIEW',
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    doc.updatedAt = new Date().toISOString();
+    doc.processLogs = [
+      ...(doc.processLogs || []),
+      {
+        id: `plog-${doc.id}-inplace-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        elapsedMs: Date.now() - sectionStart,
+        step: 'AUTO_FIX',
+        level: refusedByLayout ? 'WARN' : 'SUCCESS',
+        commandOrModule: 'native::inPlaceSectionRegen',
+        message: `Section #${params.sectionIndex + 1} rewritten inside the original ${nativeArtifact.fileType}${
+          refusedByLayout ? ' was refused by the layout and kept its previous wording' : ''
+        }; ${media.checked ? `${media.outputImages} picture(s) byte-identical` : 'no picture streams in this format'}`,
+      },
+    ];
+    saveDocumentRecord(doc);
+    return doc;
+  }
 
   const humRes = await humanizeTextChunk({
     text: chunk.originalText,

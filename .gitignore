@@ -41,6 +41,8 @@ next-env.d.ts
 !/storage/final/.gitkeep
 /storage/temp/*
 !/storage/temp/.gitkeep
+/storage/preview/*
+!/storage/preview/.gitkeep
 /storage/*.json
 /data/*
 !/data/.gitkeep

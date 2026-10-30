@@ -61,6 +61,8 @@ export interface EmbeddedDocumentImage {
   pageNumber?: number; // 1-indexed original page number where image was located
   positionRatio?: number; // 0.0 to 1.0 relative vertical/byte position in the original document
   dataUrl: string; // Valid PNG or JPEG data URL (data:image/png;base64,... or data:image/jpeg;base64,...)
+  /** Set for in-place documents: the preview bytes live in storage and are served from here. */
+  previewUrl?: string;
   mimeType: 'image/png' | 'image/jpeg';
   width: number;
   height: number;
@@ -216,6 +218,28 @@ export interface DocumentRecord {
   originalContent: string;
   finalContent: string;
   embeddedImages?: EmbeddedDocumentImage[];
+  /**
+   * Present when the uploaded container was edited in place: the humanized text
+   * was written back into the original file, so the download is that file.
+   */
+  nativeArtifact?: {
+    layoutMode: 'IN_PLACE';
+    fileType: SupportedFileType;
+    /** Edited container (the download), not a regenerated document. */
+    filePath: string;
+    /** Untouched upload bytes. */
+    originalFilePath: string;
+    bytesIn: number;
+    bytesOut: number;
+    changedUnits: number;
+    totalUnits: number;
+    imageCount: number;
+    pageCount: number;
+    mediaChecked: boolean;
+    mediaIdentical: boolean;
+    providers: string[];
+    notes: string[];
+  };
   protectedMap: ProtectedContentMap;
   chunks: DocumentChunk[];
   versions: DocumentVersion[];

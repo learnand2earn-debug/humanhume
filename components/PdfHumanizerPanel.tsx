@@ -35,7 +35,7 @@ interface PdfJob {
   jobId: string;
   traceId: string;
   originalFileName: string;
-  status: 'PENDING' | 'EXTRACTING' | 'HUMANIZING' | 'REBUILDING' | 'VALIDATING' | 'COMPLETED' | 'FAILED';
+  status: 'PENDING' | 'HUMANIZING' | 'COMPLETED' | 'FAILED';
   totalPages: number;
   processedPages: number;
   failedPages: number[];
@@ -44,7 +44,13 @@ interface PdfJob {
   startedAt?: string;
   completedAt?: string;
   downloadUrl?: string;
-  pdfBase64?: string;
+  layoutMode?: 'IN_PLACE';
+  humanizedUnits?: number;
+  totalUnits?: number;
+  revertedUnits?: number;
+  preservedImages?: number;
+  mediaIdentical?: boolean;
+  preservationNotes?: string[];
   pageResults: PageResult[];
 }
 
@@ -52,10 +58,7 @@ interface PdfJob {
 
 const STATUS_LABELS: Record<PdfJob['status'], string> = {
   PENDING: 'Queued',
-  EXTRACTING: 'Extracting Text & Images',
-  HUMANIZING: 'Humanizing Pages',
-  REBUILDING: 'Rebuilding PDF',
-  VALIDATING: 'Validating Output',
+  HUMANIZING: 'Rewriting text inside your PDF',
   COMPLETED: 'Completed',
   FAILED: 'Failed',
 };
@@ -125,33 +128,9 @@ export default function PdfHumanizerPanel() {
 
   useEffect(() => () => stopPolling(), [stopPolling]);
 
-  // ── Download (Direct Blob + URL Fallback) ───────────────────────────────
+  // ── Download ─────────────────────────────────────────────────────────────
   const downloadPdfFile = useCallback((targetJob: PdfJob | null) => {
     if (!targetJob) return;
-
-    // Direct Blob download from base64 (instant, zero server round-trip on Vercel)
-    if (targetJob.pdfBase64) {
-      try {
-        const byteCharacters = atob(targetJob.pdfBase64);
-        const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-          byteNumbers[i] = byteCharacters.charCodeAt(i);
-        }
-        const byteArray = new Uint8Array(byteNumbers);
-        const blob = new Blob([byteArray], {type: 'application/pdf'});
-        const blobUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = blobUrl;
-        a.download = `Humanized_${targetJob.originalFileName || 'document.pdf'}`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 1500);
-        return;
-      } catch {
-        // Fallback to standard URL below
-      }
-    }
 
     if (!targetJob.downloadUrl && !targetJob.jobId) return;
     const url = targetJob.downloadUrl || `/api/documents/pdf-humanize/${targetJob.jobId}/download`;
@@ -282,7 +261,10 @@ export default function PdfHumanizerPanel() {
   const isActive = isUploading || (job && !['COMPLETED', 'FAILED'].includes(job.status));
   const isCompleted = job?.status === 'COMPLETED';
   const isFailed = job?.status === 'FAILED';
-  const totalImages = job?.pageResults.reduce((sum, p) => sum + (p.imageCount || 0), 0) ?? 0;
+  const totalImages = job?.preservedImages ?? 0;
+  const changedUnits = job?.humanizedUnits ?? 0;
+  const editableUnits = job?.totalUnits ?? 0;
+  const picturesVerified = job?.mediaIdentical === true;
   const failedPageNums = job?.failedPages ?? [];
 
   // ─── Progress bar color ───────────────────────────────────────────────
@@ -302,8 +284,8 @@ export default function PdfHumanizerPanel() {
             PDF Document Humanizer
           </h2>
           <p className="text-sm text-slate-400 mt-1">
-            Upload any PDF — text humanized across every page while all images, figures, and
-            layouts are fully preserved.
+            Upload your PDF — the text is rewritten inside your own file, so every picture, its
+            position and the page design stay exactly as you uploaded them.
           </p>
         </div>
 
@@ -375,16 +357,16 @@ export default function PdfHumanizerPanel() {
               </span>
             </p>
             <p className="text-slate-500 text-xs mt-2">
-              PDF only · Max 50 MB · Images fully preserved
+              PDF only · Max 50 MB · pictures and layout stay byte-for-byte yours
             </p>
           </div>
 
           {/* Feature badges */}
           <div className="flex flex-wrap justify-center gap-2 mt-1">
             {[
-              {icon: <Shield size={11} />, label: 'Images Preserved'},
-              {icon: <Sparkles size={11} />, label: 'Every Page Humanized'},
-              {icon: <Zap size={11} />, label: 'Protected Entities Locked'},
+              {icon: <Shield size={11} />, label: 'Pictures stay byte-identical'},
+              {icon: <Sparkles size={11} />, label: 'Text edited inside your file'},
+              {icon: <Zap size={11} />, label: 'Numbers & dates locked'},
             ].map((badge) => (
               <span
                 key={badge.label}
@@ -492,7 +474,7 @@ export default function PdfHumanizerPanel() {
                 className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold shadow-lg shadow-emerald-900/40 transition-all hover:scale-[1.02] active:scale-[0.98]"
               >
                 <Download size={15} />
-                Download Humanized PDF
+                Download Your PDF ({changedUnits}/{editableUnits} blocks edited in place)
               </button>
             )}
           </div>
@@ -501,10 +483,10 @@ export default function PdfHumanizerPanel() {
           <div className="flex flex-col gap-1.5">
             <div className="flex justify-between items-center">
               <span className="text-xs text-slate-400">
-                {job.processedPages} / {job.totalPages || '?'} pages
+                {job.processedPages} / {job.totalPages || '?'} pages with new wording
                 {failedPageNums.length > 0 && (
                   <span className="text-red-400 ml-2">
-                    · {failedPageNums.length} page(s) failed
+                    · {failedPageNums.length} page(s) reported a problem
                   </span>
                 )}
               </span>
@@ -535,16 +517,16 @@ export default function PdfHumanizerPanel() {
                   color: 'text-blue-300',
                 },
                 {
-                  label: 'Images Preserved',
+                  label: picturesVerified ? 'Pictures verified identical' : 'Picture objects',
                   value: totalImages,
                   icon: <ImageIcon size={13} className="text-violet-400" />,
                   color: 'text-violet-300',
                 },
                 {
-                  label: 'Failed Pages',
-                  value: failedPageNums.length,
-                  icon: <AlertCircle size={13} className="text-red-400" />,
-                  color: failedPageNums.length > 0 ? 'text-red-300' : 'text-slate-500',
+                  label: 'Text blocks rewritten',
+                  value: `${changedUnits}/${editableUnits}`,
+                  icon: <AlertCircle size={13} className="text-emerald-400" />,
+                  color: changedUnits > 0 ? 'text-emerald-300' : 'text-slate-500',
                 },
               ].map((stat) => (
                 <div
@@ -628,23 +610,15 @@ export default function PdfHumanizerPanel() {
                             : 'text-blue-400'
                         }`}
                       >
-                        {page.status === 'SKIPPED' ? 'No text (image-only page)' : page.status}
+                        {page.status === 'SKIPPED'
+                          ? 'Kept its original wording'
+                          : page.status === 'HUMANIZED'
+                          ? 'Text rewritten in place'
+                          : page.status}
                         {page.errorReason && (
                           <span className="text-red-400/70 ml-1">— {page.errorReason}</span>
                         )}
                       </span>
-                      {page.imageCount > 0 && (
-                        <span className="flex items-center gap-1 text-xs text-violet-400 shrink-0">
-                          <ImageIcon size={10} />
-                          {page.imageCount}
-                        </span>
-                      )}
-                      {page.retryCount > 0 && (
-                        <span className="text-xs text-amber-400 shrink-0">
-                          {page.retryCount} retr{page.retryCount === 1 ? 'y' : 'ies'}
-                        </span>
-                      )}
-                      <span className="text-xs text-slate-600 shrink-0">{page.durationMs}ms</span>
                     </div>
                   ))}
                 </div>
@@ -684,19 +658,27 @@ export default function PdfHumanizerPanel() {
           <CheckCircle2 size={18} className="text-emerald-400 shrink-0 mt-0.5" />
           <div>
             <p className="text-sm font-semibold text-emerald-300">
-              PDF Humanized & Ready to Download
+              {changedUnits > 0
+                ? `${changedUnits} of ${editableUnits} text block(s) rewritten inside your PDF`
+                : 'Your PDF came back with its original wording'}
             </p>
             <p className="text-xs text-emerald-400/80 mt-0.5">
-              {job.processedPages} page{job.processedPages !== 1 ? 's' : ''} humanized ·{' '}
-              {totalImages} image{totalImages !== 1 ? 's' : ''} preserved ·{' '}
-              {failedPageNums.length > 0
-                ? `${failedPageNums.length} page(s) kept original (no text found)`
-                : '100% pages processed'}
+              {job.processedPages} of {job.totalPages} page(s) carry new wording ·{' '}
+              {totalImages} picture object(s){' '}
+              {picturesVerified
+                ? 'verified byte-identical to your upload, at their original positions'
+                : 'could not be verified as identical — check before you rely on this file'}
+            </p>
+            <p className="text-xs text-slate-400 mt-1">
+              Any block whose new wording would not have fitted its original slot was left exactly
+              as you uploaded it, so nothing on the page moved.
+              {job.revertedUnits
+                ? ` ${job.revertedUnits} block(s) were handed back because the humanizer had changed a figure, date or reference.`
+                : ''}
             </p>
             {failedPageNums.length > 0 && (
               <p className="text-xs text-amber-400/80 mt-1">
-                Pages {failedPageNums.join(', ')} contained no selectable text and were preserved
-                in their original form.
+                Pages {failedPageNums.join(', ')} were reported back unchanged.
               </p>
             )}
           </div>
@@ -710,19 +692,19 @@ export default function PdfHumanizerPanel() {
             {
               step: '1',
               title: 'Upload PDF',
-              desc: 'Drag & drop or browse for your PDF. Multi-page, complex layouts supported.',
+              desc: 'Drag & drop or browse for your PDF. Multi-page documents are fine.',
               icon: <Upload size={16} className="text-violet-400" />,
             },
             {
               step: '2',
               title: 'Auto-Humanize',
-              desc: 'Every page is processed through the HumanFlow engine. Images stay untouched.',
+              desc: 'Each text block is rewritten inside the file. A block that would not fit its original slot keeps its wording, so nothing shifts.',
               icon: <Sparkles size={16} className="text-violet-400" />,
             },
             {
               step: '3',
               title: 'Download',
-              desc: 'Get your humanized PDF with all figures, captions, and formatting preserved.',
+              desc: 'You get your own PDF back with new text — same images, same positions, same pages, since only the text bytes changed.',
               icon: <Download size={16} className="text-violet-400" />,
             },
           ].map((item) => (

@@ -43,7 +43,8 @@ export async function POST(req: NextRequest) {
       const arrayBuf = await file.arrayBuffer();
       const rawBuffer = Buffer.from(arrayBuf);
 
-      // Extract clean readable text from DOCX/PDF/XLSX binary streams
+      // Extract clean readable text from the binary container for preview/analysis only.
+      // The uploaded bytes themselves are what get processed and returned.
       let extractedBinaryText: string | null = null;
 
       if (validation.fileType === 'PDF') {
@@ -65,13 +66,7 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      if (extractedBinaryText && extractedBinaryText.trim().length > 0) {
-        rawContent = extractedBinaryText;
-      } else if (validation.fileType === 'PDF' || validation.fileType === 'DOCX' || validation.fileType === 'XLSX') {
-        rawContent = `# ${validation.sanitizedFileName.replace(/\.[^.]+$/, '')}\n\nThis document is a binary ${validation.fileType} file with embedded visual elements. The original file has been preserved intact in storage. For specialized page-by-page PDF reconstruction, use the dedicated PDF Humanizer studio tab.`;
-      } else {
-        rawContent = rawBuffer.subarray(0, Math.min(rawBuffer.length, 65536)).toString('utf-8');
-      }
+      rawContent = extractedBinaryText?.trim() || '';
 
       const processedDoc = await executeAutonomousDocumentPipeline({
         fileName: validation.sanitizedFileName,
@@ -103,12 +98,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Automatically run the complete 15-stage pipeline without requiring manual user intervention
+    // Automatically run the complete pipeline without requiring manual user intervention
     const processedDoc = await executeAutonomousDocumentPipeline({
       fileName: validation.sanitizedFileName,
       fileType: validation.fileType,
       fileSize,
       rawContent,
+      rawBuffer: Buffer.from(rawContent, 'utf-8'),
     });
 
     return NextResponse.json({

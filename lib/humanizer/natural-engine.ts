@@ -341,6 +341,142 @@ export const AI_CLICHE_TRANSFORMS: Array<[RegExp, string]> = [
   [/\bmitigated\b/gi, 'lessened'],
 ];
 
+// ─── Everyday Wording & Contractions ─────────────────────────────────────────
+
+/**
+ * Formal business/academic wording replaced by the word a person would actually
+ * type. Every replacement is shorter than or equal to what it replaces, because
+ * in-place document editing has to keep the original text slot.
+ */
+export const PLAIN_WORD_TRANSFORMS: Array<[RegExp, string]> = [
+  [/\bprovides us with\b/gi, 'gives us'],
+  [/\bprovide you with\b/gi, 'give you'],
+  [/\bprovides\b/gi, 'gives'],
+  [/\bprovide\b/gi, 'give'],
+  [/\bproviding\b/gi, 'giving'],
+  [/\bobtains\b/gi, 'gets'],
+  [/\bobtain\b/gi, 'get'],
+  [/\bobtained\b/gi, 'got'],
+  [/\bobtaining\b/gi, 'getting'],
+  [/\brequires\b/gi, 'needs'],
+  [/\brequire\b/gi, 'need'],
+  [/\brequired\b/gi, 'needed'],
+  [/\bsufficient\b/gi, 'enough'],
+  [/\bassistance\b/gi, 'help'],
+  [/\baccomplishes\b/gi, 'completes'],
+  [/\baccomplished\b/gi, 'completed'],
+  [/\baccomplish\b/gi, 'complete'],
+  [/\bachieves\b/gi, 'reaches'],
+  [/\bachieve\b/gi, 'reach'],
+  [/\bachieved\b/gi, 'reached'],
+  [/\bapproximately\b/gi, 'about'],
+  [/\bsubsequently\b/gi, 'later'],
+  [/\bsubsequent\b/gi, 'later'],
+  [/\bconstitutes\b/gi, 'is'],
+  [/\bregarding\b/gi, 'about'],
+  [/\badditional\b/gi, 'extra'],
+  [/\binitiates\b/gi, 'starts'],
+  [/\binitiate\b/gi, 'start'],
+  [/\binitiated\b/gi, 'started'],
+  [/\bfinalizes\b/gi, 'finishes'],
+  [/\bfinalize\b/gi, 'finish'],
+  [/\bfinalized\b/gi, 'finished'],
+  [/\battempts to\b/gi, 'tries to'],
+  [/\battempted to\b/gi, 'tried to'],
+  [/\bparticipates in\b/gi, 'joins'],
+  [/\bparticipate in\b/gi, 'join'],
+  [/\bparticipated in\b/gi, 'joined'],
+  [/\bmethodologies\b/gi, 'methods'],
+  [/\bmethodology\b/gi, 'method'],
+  [/\bcapabilities\b/gi, 'abilities'],
+  [/\bcapability\b/gi, 'ability'],
+  [/\bopportunities\b/gi, 'chances'],
+  [/\bopportunity\b/gi, 'chance'],
+  [/\bindividuals\b/gi, 'people'],
+  [/\bindividual\b/gi, 'person'],
+  [/\bwe would like to\b/gi, 'we want to'],
+  [/\bi would like to\b/gi, 'I want to'],
+  [/\byou would like to\b/gi, 'you want to'],
+  [/\bplease note that\b/gi, 'note that'],
+  [/\bit should be noted that\b/gi, 'note that'],
+  [/\bwith reference to\b/gi, 'about'],
+  [/\bas well as\b/gi, 'and'],
+  [/\btake into consideration\b/gi, 'consider'],
+  [/\btakes into consideration\b/gi, 'considers'],
+  [/\btaking into consideration\b/gi, 'considering'],
+  [/\bat the present time\b/gi, 'now'],
+  [/\bat the current time\b/gi, 'now'],
+  [/\beach and every\b/gi, 'every'],
+  [/\bvarious different\b/gi, 'various'],
+  [/\babsolutely essential\b/gi, 'essential'],
+  [/\badvance planning\b/gi, 'planning'],
+  [/\bbasic fundamentals\b/gi, 'fundamentals'],
+  [/\bpast history\b/gi, 'history'],
+  [/\bfuture plans\b/gi, 'plans'],
+  [/\bcompletely eliminate\b/gi, 'eliminate'],
+  [/\brevert back\b/gi, 'revert'],
+  [/\breturn back\b/gi, 'return'],
+  [/\bcooperate together\b/gi, 'cooperate'],
+  [/\bjoin together\b/gi, 'join'],
+  [/\bend result\b/gi, 'result'],
+  [/\bfinal outcome\b/gi, 'outcome'],
+  [/\bnecessary requirements\b/gi, 'requirements'],
+  [/\bpersonnel\b/gi, 'staff'],
+];
+
+/** Written English turned spoken. Skipped for legal clauses, where "do not" must stay explicit. */
+export const CONTRACTION_TRANSFORMS: Array<[RegExp, string]> = [
+  [/\bI am not\b/gi, "I'm not"],
+  [/\bI am\b/gi, "I'm"],
+  [/\bcannot\b/gi, "can't"],
+  [/\bcan not\b/gi, "can't"],
+  [/\bcould not\b/gi, "couldn't"],
+  [/\bshould not\b/gi, "shouldn't"],
+  [/\bwould not\b/gi, "wouldn't"],
+  [/\bwill not\b/gi, "won't"],
+  [/\bdo not\b/gi, "don't"],
+  [/\bdoes not\b/gi, "doesn't"],
+  [/\bdid not\b/gi, "didn't"],
+  [/\bare not\b/gi, "aren't"],
+  [/\bis not\b/gi, "isn't"],
+  [/\bwas not\b/gi, "wasn't"],
+  [/\bwere not\b/gi, "weren't"],
+  [/\bhave not\b/gi, "haven't"],
+  [/\bhas not\b/gi, "hasn't"],
+  [/\bhad not\b/gi, "hadn't"],
+  [/\bwe are\b/gi, "we're"],
+  [/\byou are\b/gi, "you're"],
+  [/\bthey are\b/gi, "they're"],
+  [/\bthat is\b/gi, "that's"],
+  [/\bthere is\b/gi, "there's"],
+  [/\bhere is\b/gi, "here's"],
+  [/\bwhat is\b/gi, "what's"],
+  [/\bit is\b/gi, "it's"],
+  [/\bhe is\b/gi, "he's"],
+  [/\bshe is\b/gi, "she's"],
+  [/\bwe will\b/gi, "we'll"],
+  [/\byou will\b/gi, "you'll"],
+  [/\bthey will\b/gi, "they'll"],
+  [/\bI will\b/gi, "I'll"],
+  [/\bhe will\b/gi, "he'll"],
+  [/\bshe will\b/gi, "she'll"],
+  [/\bwe have\b/gi, "we've"],
+  [/\byou have\b/gi, "you've"],
+  [/\bthey have\b/gi, "they've"],
+  [/\bI have\b/gi, "I've"],
+  [/\blet us\b/gi, "let's"],
+];
+
+/** Applies a replacement while keeping the capitalisation the original had. */
+function replaceCaseAware(text: string, pattern: RegExp, replacement: string): string {
+  return text.replace(pattern, (match: string) => {
+    const first = match.charAt(0);
+    return first === first.toUpperCase() && first !== first.toLowerCase()
+      ? replacement.charAt(0).toUpperCase() + replacement.slice(1)
+      : replacement;
+  });
+}
+
 // ─── Cadence & Burstiness Engine ─────────────────────────────────────────────
 
 /**
@@ -423,6 +559,18 @@ export function transformWithNaturalEngine(
       continue; // Preserve strict legal clause definitions
     }
     working = working.replace(pattern, replacement);
+  }
+
+  // 2b. Everyday wording, so plain corporate prose does not come back untouched.
+  if (!isLegalClause) {
+    for (const [pattern, replacement] of PLAIN_WORD_TRANSFORMS) {
+      working = replaceCaseAware(working, pattern, replacement);
+    }
+    if (intensity !== 'LOW') {
+      for (const [pattern, replacement] of CONTRACTION_TRANSFORMS) {
+        working = replaceCaseAware(working, pattern, replacement);
+      }
+    }
   }
 
   // 3. Process paragraph by paragraph for cadence and burstiness

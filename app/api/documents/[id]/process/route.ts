@@ -1,9 +1,17 @@
 import {NextRequest, NextResponse} from 'next/server';
 import {getDocumentById} from '@/lib/db/store';
+import {readBinaryFromPrivateStorage, storagePathFor} from '@/lib/storage';
 import {
   executeAutonomousDocumentPipeline,
   regenerateSingleDocumentSection,
 } from '@/lib/queue/pipeline';
+
+/** Re-processing always starts from the untouched upload, never from a previous output. */
+function originalBytes(doc: {id: string; originalName: string; nativeArtifact?: {originalFilePath: string}}): Buffer | undefined {
+  const path = doc.nativeArtifact?.originalFilePath || storagePathFor('original', doc.id, doc.originalName).virtualPath;
+  const bytes = readBinaryFromPrivateStorage(path);
+  return bytes && bytes.length > 0 ? bytes : undefined;
+}
 
 export async function POST(
   req: NextRequest,
@@ -32,6 +40,7 @@ export async function POST(
     fileType: doc.fileType,
     fileSize: doc.fileSize,
     rawContent: doc.originalContent,
+    rawBuffer: originalBytes(doc),
     existingDocId: doc.id,
   });
 

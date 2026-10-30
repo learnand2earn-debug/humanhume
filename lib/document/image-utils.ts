@@ -144,6 +144,111 @@ export function encodeRgbaBufferToPngDataUrl(
 
 const diagramPngCache = new Map<string, string>();
 
+function paethPredictor(a: number, b: number, c: number): number {
+  const p = a + b - c;
+  const pa = Math.abs(p - a);
+  const pb = Math.abs(p - b);
+  const pc = Math.abs(p - c);
+  if (pa <= pb && pa <= pc) return a;
+  if (pb <= pc) return b;
+  return c;
+}
+
+function decodePdfPixelData(raw: Buffer, width: number, height: number, dict: string): Buffer | null {
+  const bitsMatch = dict.match(/\/BitsPerComponent\s+(\d+)/i);
+  const bits = bitsMatch ? Math.max(1, Math.min(32, parseInt(bitsMatch[1], 10))) : 8;
+  const colorSpaceMatch = dict.match(/\/ColorSpace\s*(?:\[([\s\S]*?)\]|\/([A-Za-z0-9]+))/i);
+  const colorSpace = (colorSpaceMatch?.[1] || colorSpaceMatch?.[2] || 'DeviceRGB').toString();
+  const predictorMatch = dict.match(/\/Predictor\s+(\d+)/i);
+  const predictor = predictorMatch ? parseInt(predictorMatch[1], 10) : 1;
+
+  const isGray = /DeviceGray|ICCBased/i.test(colorSpace);
+  const isRgb = /DeviceRGB|Indexed/i.test(colorSpace);
+  const isCmyk = /DeviceCMYK/i.test(colorSpace);
+  let channels = isGray ? 1 : isRgb ? 3 : isCmyk ? 4 : 3;
+
+  if (predictor >= 15) {
+    const bytesPerPixel = Math.max(1, Math.ceil((bits * channels) / 8));
+    const rowBytes = Math.max(1, Math.ceil((width * channels * bits) / 8));
+    const filtered = Buffer.alloc(raw.length);
+    let prev = Buffer.alloc(rowBytes);
+    let inPos = 0;
+
+    for (let y = 0; y < height; y++) {
+      const rowStart = y * rowBytes;
+      const filterType = raw[inPos++];
+      const row = Buffer.from(raw.subarray(inPos, inPos + rowBytes));
+      inPos += rowBytes;
+
+      const out = Buffer.alloc(row.length);
+      for (let x = 0; x < row.length; x++) {
+        let left = x >= bytesPerPixel ? out[x - bytesPerPixel] : 0;
+        let up = prev[x];
+        let val = row[x];
+
+        switch (filterType) {
+          case 1:
+            val = (val + left) & 0xff;
+            break;
+          case 2:
+            val = (val + up) & 0xff;
+            break;
+          case 3:
+            val = (val + Math.floor((left + up) / 2)) & 0xff;
+            break;
+          case 4:
+            val = (val + paethPredictor(left, up, prev[x - bytesPerPixel] || 0)) & 0xff;
+            break;
+          default:
+            val = row[x];
+            break;
+        }
+        out[x] = val;
+      }
+      filtered.set(out, rowStart);
+      prev = out;
+    }
+    raw = filtered;
+  }
+
+  const expectedLen = width * height * channels;
+  if (raw.length < expectedLen) return null;
+
+  const rgba = Buffer.alloc(width * height * 4);
+  for (let i = 0; i < width * height; i++) {
+    const idx = i * channels;
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    let a = 255;
+
+    if (isGray) {
+      const gray = raw[idx];
+      r = gray; g = gray; b = gray;
+    } else if (isRgb) {
+      r = raw[idx];
+      g = raw[idx + 1] ?? r;
+      b = raw[idx + 2] ?? g;
+    } else if (isCmyk) {
+      const c = raw[idx];
+      const m = raw[idx + 1] ?? c;
+      const y = raw[idx + 2] ?? m;
+      const k = raw[idx + 3] ?? 0;
+      r = Math.max(0, 255 - ((c * 255) / 255) - (k * 255) / 255);
+      g = Math.max(0, 255 - ((m * 255) / 255) - (k * 255) / 255);
+      b = Math.max(0, 255 - ((y * 255) / 255) - (k * 255) / 255);
+    }
+
+    const px = i * 4;
+    rgba[px] = r;
+    rgba[px + 1] = g;
+    rgba[px + 2] = b;
+    rgba[px + 3] = a;
+  }
+
+  return rgba;
+}
+
 /**
  * Generates a 100% valid, uncompressed/zlib-compressed PNG data URL (`data:image/png;base64,...`)
  * purely in Node.js or browser memory without requiring external native canvas dependencies.
@@ -480,25 +585,8 @@ function extractPdfImageXObjects(
           inflated = zlib.inflateRawSync(streamSlice);
         }
 
-        const pixelCount = width * height;
-        const rgba = Buffer.alloc(pixelCount * 4);
-
-        if (inflated.length >= pixelCount * 3) {
-          for (let p = 0; p < pixelCount; p++) {
-            rgba[p * 4] = inflated[p * 3];
-            rgba[p * 4 + 1] = inflated[p * 3 + 1];
-            rgba[p * 4 + 2] = inflated[p * 3 + 2];
-            rgba[p * 4 + 3] = 255;
-          }
-        } else if (inflated.length >= pixelCount) {
-          for (let p = 0; p < pixelCount; p++) {
-            const v = inflated[p];
-            rgba[p * 4] = v;
-            rgba[p * 4 + 1] = v;
-            rgba[p * 4 + 2] = v;
-            rgba[p * 4 + 3] = 255;
-          }
-        } else {
+        const decoded = decodePdfPixelData(inflated, width, height, dict);
+        if (!decoded) {
           continue;
         }
 
@@ -509,7 +597,7 @@ function extractPdfImageXObjects(
           sectionIndex: mappedSection,
           pageNumber: Math.max(1, Math.ceil(positionRatio * 2)),
           positionRatio,
-          dataUrl: encodeRgbaBufferToPngDataUrl(rgba, width, height),
+          dataUrl: encodeRgbaBufferToPngDataUrl(decoded, width, height),
           mimeType: 'image/png',
           width,
           height,
@@ -525,13 +613,9 @@ function extractPdfImageXObjects(
     const pixelCount = width * height;
     if (streamSlice.length >= pixelCount * 3) {
       try {
-        const rgba = Buffer.alloc(pixelCount * 4);
-        for (let p = 0; p < pixelCount; p++) {
-          rgba[p * 4] = streamSlice[p * 3];
-          rgba[p * 4 + 1] = streamSlice[p * 3 + 1];
-          rgba[p * 4 + 2] = streamSlice[p * 3 + 2];
-          rgba[p * 4 + 3] = 255;
-        }
+        const decoded = decodePdfPixelData(streamSlice, width, height, dict);
+        if (!decoded) continue;
+
         results.push({
           id: `img-pdf-raw-${docId}-${results.length + 1}`,
           label: `Embedded Figure ${results.length + 1} (${width}x${height}px)`,
@@ -539,7 +623,7 @@ function extractPdfImageXObjects(
           sectionIndex: mappedSection,
           pageNumber: Math.max(1, Math.ceil(positionRatio * 2)),
           positionRatio,
-          dataUrl: encodeRgbaBufferToPngDataUrl(rgba, width, height),
+          dataUrl: encodeRgbaBufferToPngDataUrl(decoded, width, height),
           mimeType: 'image/png',
           width,
           height,
