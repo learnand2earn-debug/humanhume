@@ -1,3 +1,4 @@
+import fs from 'fs';
 import path from 'path';
 import url from 'url';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
@@ -46,9 +47,40 @@ async function testMultiPage() {
   });
   const res = await parser.getText();
   console.log('Total extracted pages:', res.total);
-  res.pages.forEach((p: any, i: number) => {
-    console.log(`Page ${i + 1} (num=${p.num}):`, JSON.stringify(p.text));
+  console.log('\n--- Running runPdfHumanizationPipeline on 3-page PDF ---');
+  const { runPdfHumanizationPipeline } = await import('./lib/document/pdf-native-humanizer');
+  const job = await runPdfHumanizationPipeline({
+    jobId: 'multipage-job-1',
+    traceId: 'multipage-trace-1',
+    fileName: 'multipage-test.pdf',
+    pdfBuffer: Buffer.from(bytes),
+    intensity: 'NORMAL',
   });
+
+  console.log('Job status:', job.status);
+  console.log('Total pages:', job.totalPages);
+  console.log('Processed pages:', job.processedPages);
+  console.log('Humanized units:', job.humanizedUnits);
+  console.log('Total units:', job.totalUnits);
+  console.log('Page results count:', job.pageResults.length);
+  job.pageResults.forEach((r, idx) => {
+    console.log(`Page ${idx + 1}: status=${r.status}, orig="${r.originalText}", hum="${r.humanizedText}"`);
+  });
+
+  if (job.outputBuffer) {
+    fs.writeFileSync('output_test_multipage.pdf', job.outputBuffer);
+    console.log('Saved output_test_multipage.pdf, size:', job.outputBuffer.length);
+
+    const outParser = new PDFParse({
+      data: new Uint8Array(job.outputBuffer),
+      standardFontDataUrl: fontDir,
+    });
+    const outRes = await outParser.getText();
+    console.log('\n--- VERIFIED TEXT IN OUTPUT PDF ---');
+    outRes.pages.forEach((p: any, i: number) => {
+      console.log(`Verified Page ${i + 1}:`, JSON.stringify(p.text));
+    });
+  }
 }
 
 testMultiPage().catch(console.error);

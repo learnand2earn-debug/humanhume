@@ -711,12 +711,14 @@ In order to maintain SLA compliance across all regions, engineering teams utiliz
         <div className="flex items-center gap-3 shrink-0">
           <button
             onClick={() => {
-              setActiveNav('workspace');
-              fileInputRef.current?.click();
+              setActiveNav('pdf-humanize');
+              const input = document.getElementById('pdf-humanizer-file-input') as HTMLInputElement | null;
+              if (input) input.click();
             }}
-            className="px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors whitespace-nowrap shrink-0"
+            className="px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer flex items-center gap-1.5"
           >
-            Upload Document
+            <Upload className="w-3.5 h-3.5" />
+            Upload PDF to Humanize
           </button>
         </div>
       </header>

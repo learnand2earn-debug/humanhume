@@ -22,6 +22,11 @@ async function testPdfHumanizePipeline() {
   if (res.outputBuffer) {
     fs.writeFileSync('output_test_humanized.pdf', res.outputBuffer);
     console.log('Saved output_test_humanized.pdf, size:', res.outputBuffer.length);
+
+    const { compareMediaPreservation } = await import('./lib/document/native-verify');
+    const mediaCheck = await compareMediaPreservation(buf, res.outputBuffer, 'PDF');
+    console.log('Images byte-for-byte identical:', mediaCheck.identical);
+    console.log('Images count - input:', mediaCheck.inputImages, 'output:', mediaCheck.outputImages);
   }
 }
 

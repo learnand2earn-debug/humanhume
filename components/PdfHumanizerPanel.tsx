@@ -86,6 +86,20 @@ export default function PdfHumanizerPanel() {
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
 
+  // ── Download ─────────────────────────────────────────────────────────────
+  const downloadPdfFile = useCallback((targetJob: PdfJob | null) => {
+    if (!targetJob) return;
+
+    if (!targetJob.downloadUrl && !targetJob.jobId) return;
+    const url = targetJob.downloadUrl || `/api/documents/pdf-humanize/${targetJob.jobId}/download`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Humanized_${targetJob.originalFileName || 'document.pdf'}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }, []);
+
   // ── Polling ────────────────────────────────────────────────────────────
   const stopPolling = useCallback(() => {
     if (pollIntervalRef.current) {
@@ -109,12 +123,17 @@ export default function PdfHumanizerPanel() {
 
         if (data.status === 'COMPLETED' || data.status === 'FAILED') {
           stopPolling();
+          if (data.status === 'COMPLETED') {
+            setTimeout(() => {
+              downloadPdfFile(data);
+            }, 350);
+          }
         }
       } catch {
         // Network blip — keep polling
       }
     },
-    [stopPolling]
+    [downloadPdfFile, stopPolling]
   );
 
   const startPolling = useCallback(
@@ -127,20 +146,6 @@ export default function PdfHumanizerPanel() {
   );
 
   useEffect(() => () => stopPolling(), [stopPolling]);
-
-  // ── Download ─────────────────────────────────────────────────────────────
-  const downloadPdfFile = useCallback((targetJob: PdfJob | null) => {
-    if (!targetJob) return;
-
-    if (!targetJob.downloadUrl && !targetJob.jobId) return;
-    const url = targetJob.downloadUrl || `/api/documents/pdf-humanize/${targetJob.jobId}/download`;
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Humanized_${targetJob.originalFileName || 'document.pdf'}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  }, []);
 
   // ── Upload & Submit ────────────────────────────────────────────────────
   const uploadPdf = useCallback(

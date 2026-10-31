@@ -24,6 +24,9 @@ import {
   type NativeHumanizeResult,
 } from '@/lib/document/native-document';
 import {compareMediaPreservation} from '@/lib/document/native-verify';
+import {isPageScannedOrImageOnly, ocrScannedPdfPages} from '@/lib/document/pdf-ocr';
+import {humanizeTextChunk} from '@/lib/humanizer/client';
+import {PDFDocument, StandardFonts, rgb, PDFName, PDFRawStream, decodePDFRawStream, PDFNumber} from 'pdf-lib';
 
 declare const __non_webpack_require__: any;
 
@@ -773,7 +776,7 @@ export async function runPdfHumanizationPipeline(params: {
   }
 
   // The pictures are only claimed preserved once the bytes say so.
-  const media = await compareMediaPreservation(pdfBuffer, native.buffer, 'PDF');
+  let media = await compareMediaPreservation(pdfBuffer, native.buffer, 'PDF');
 
   const byPage = new Map<number, {original: string[]; humanized: string[]}>();
   native.texts.forEach((text, i) => {
@@ -784,26 +787,247 @@ export async function runPdfHumanizationPipeline(params: {
     byPage.set(pageNumber, entry);
   });
 
-  const pageResults: PageProcessingResult[] = [...byPage.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([pageNumber, pair]) => {
-      const original = pair.original.join('\n');
-      const humanized = pair.humanized.join('\n');
-      return {
+  // Check for scanned / image-only pages and unhandled text pages
+  const ocrProcessedPages = new Set<number>();
+  let pageData: PdfPageData[] = [];
+  try {
+    const totalPages = Math.max(1, native.pageCount);
+    const scannedPages: number[] = [];
+    pageData = await extractPdfPageData(pdfBuffer);
+
+    for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+      const pageEntry = byPage.get(pageNum);
+      const hasText = pageEntry && pageEntry.original.some((t) => t.trim().length > 0);
+      if (!hasText) {
+        const pInfo = pageData.find((p) => p.pageNumber === pageNum);
+        if (pInfo && isPageScannedOrImageOnly(pInfo.rawText, pInfo.imageCount)) {
+          scannedPages.push(pageNum);
+        }
+      }
+    }
+
+    if (scannedPages.length > 0) {
+      updatePdfJob(jobId, {
+        progressPercent: Math.min(85, (getPdfJob(jobId)?.progressPercent || 20) + 10),
+        preservationNotes: [`Detected ${scannedPages.length} scanned page(s). Running OCR...`],
+      });
+
+      const ocrMap = await ocrScannedPdfPages({
+        pdfBuffer,
+        scannedPageNumbers: scannedPages,
+      });
+
+      if (ocrMap.size > 0) {
+        const outDoc = await PDFDocument.load(native.buffer, {ignoreEncryption: true});
+        const stdFont = await outDoc.embedFont(StandardFonts.Helvetica);
+        let ocrChanged = 0;
+
+        for (const [pageNum, text] of ocrMap) {
+          ocrProcessedPages.add(pageNum);
+          const humanized = await humanizeTextChunk({
+            text,
+            intensity,
+            traceId: `${traceId}-ocr-p${pageNum}`,
+          });
+
+          const page = outDoc.getPage(pageNum - 1);
+          const {width, height} = page.getSize();
+          const margin = 45;
+          const contentWidth = width - margin * 2;
+          const words = (humanized.humanizedText || text).split(/\s+/).filter(Boolean);
+
+          let currentLine = '';
+          let yCursor = height - margin - 20;
+          const lines: string[] = [];
+          for (const w of words) {
+            const test = currentLine ? `${currentLine} ${w}` : w;
+            if (stdFont.widthOfTextAtSize(test, 10.5) <= contentWidth) {
+              currentLine = test;
+            } else {
+              lines.push(currentLine);
+              currentLine = w;
+            }
+          }
+          if (currentLine) lines.push(currentLine);
+
+          // Cleanly mask the scanned text area so old raster text does not overlap with new text
+          page.drawRectangle({
+            x: margin - 6,
+            y: margin,
+            width: contentWidth + 12,
+            height: height - margin * 2,
+            color: rgb(1, 1, 1),
+            opacity: 0.96,
+          });
+
+          for (const line of lines) {
+            if (yCursor < margin) break;
+            page.drawText(line, {
+              x: margin,
+              y: yCursor,
+              size: 10.5,
+              font: stdFont,
+              color: rgb(0.1, 0.1, 0.1),
+            });
+            yCursor -= 14;
+          }
+
+          ocrChanged++;
+          byPage.set(pageNum, {original: [text], humanized: [humanized.humanizedText || text]});
+        }
+
+        const outBytes = await outDoc.save({useObjectStreams: false});
+        native.buffer = Buffer.from(outBytes);
+        native.changedUnits = (native.changedUnits || 0) + ocrChanged;
+        native.totalUnits = (native.totalUnits || 0) + ocrMap.size;
+        native.warnings.push(`Processed ${ocrMap.size} scanned page(s) using OCR`);
+      }
+    }
+
+    // Secondary pass: ensure NO page with readable text is skipped
+    // (Handles Type0 / CID / complex subset fonts where stream surgery didn't produce units)
+    let secondaryChanged = 0;
+    const pendingDoc = await PDFDocument.load(native.buffer, {ignoreEncryption: true});
+    const secondaryFont = await pendingDoc.embedFont(StandardFonts.Helvetica);
+
+    for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+      const pageEntry = byPage.get(pageNum);
+      const alreadyModified = pageEntry && pageEntry.original.some((t, i) => t !== pageEntry.humanized[i]);
+      if (alreadyModified || ocrProcessedPages.has(pageNum)) continue;
+
+      const pInfo = pageData.find((p) => p.pageNumber === pageNum);
+      const rawText = (pInfo?.rawText || '').trim();
+      if (rawText.length > 20) {
+        try {
+          const humanized = await humanizeTextChunk({
+            text: rawText,
+            intensity,
+            traceId: `${traceId}-fallback-p${pageNum}`,
+          });
+
+          const humText = (humanized.humanizedText || rawText).trim();
+          if (humText && humText !== rawText) {
+            const page = pendingDoc.getPage(pageNum - 1);
+            const {width, height} = page.getSize();
+            const margin = 48;
+            const contentWidth = width - margin * 2;
+
+            // Silence old text showing operators in the content stream:
+            const pageNode = (page as any).node;
+            const contentsRef = pageNode.get(PDFName.of('Contents'));
+            if (contentsRef) {
+              const rawStream = pendingDoc.context.lookup(contentsRef);
+              if (rawStream instanceof PDFRawStream) {
+                try {
+                  const decoded = decodePDFRawStream(rawStream).decode();
+                  const streamStr = Buffer.from(decoded).toString('latin1');
+                  const silenced = streamStr
+                    .replace(/\((?:[^()\\]|\\.)*\)\s*(?:Tj|'|")/g, '() Tj')
+                    .replace(/\[[^\]]*\]\s*TJ/g, '[] TJ');
+                  if (silenced !== streamStr) {
+                    const comp = zlib.deflateSync(Buffer.from(silenced, 'latin1'));
+                    const ns = PDFRawStream.of(
+                      pendingDoc.context.obj({
+                        Filter: 'FlateDecode',
+                        Length: PDFNumber.of(comp.length),
+                      }),
+                      new Uint8Array(comp)
+                    );
+                    pendingDoc.context.assign(contentsRef, ns);
+                  }
+                } catch {
+                  // Fallback
+                }
+              }
+            }
+
+            // Draw new humanized text at the page margins cleanly
+            const paragraphs = humText.split(/\n\s*\n/).filter(Boolean);
+            let yCursor = height - margin - 15;
+            for (const para of paragraphs) {
+              const words = para.split(/\s+/).filter(Boolean);
+              let line = '';
+              for (const w of words) {
+                const test = line ? `${line} ${w}` : w;
+                if (secondaryFont.widthOfTextAtSize(test, 10) <= contentWidth) {
+                  line = test;
+                } else {
+                  if (yCursor < margin) break;
+                  page.drawText(line, {x: margin, y: yCursor, size: 10, font: secondaryFont, color: rgb(0.12, 0.15, 0.2)});
+                  yCursor -= 14;
+                  line = w;
+                }
+              }
+              if (line && yCursor >= margin) {
+                page.drawText(line, {x: margin, y: yCursor, size: 10, font: secondaryFont, color: rgb(0.12, 0.15, 0.2)});
+                yCursor -= 18;
+              }
+            }
+
+            secondaryChanged++;
+            byPage.set(pageNum, {original: [rawText], humanized: [humText]});
+          }
+        } catch (err) {
+          console.warn(`[PDF Humanizer] Page ${pageNum} secondary processing note:`, err);
+        }
+      }
+    }
+
+    if (secondaryChanged > 0) {
+      const updatedBytes = await pendingDoc.save({useObjectStreams: false});
+      native.buffer = Buffer.from(updatedBytes);
+      native.changedUnits = (native.changedUnits || 0) + secondaryChanged;
+      native.totalUnits = (native.totalUnits || 0) + secondaryChanged;
+    }
+  } catch (ocrErr) {
+    console.warn('[PDF Humanizer] Secondary processing note:', ocrErr);
+  }
+
+  // The pictures are only claimed preserved once the bytes say so.
+  media = await compareMediaPreservation(pdfBuffer, native.buffer, 'PDF');
+
+  // Build comprehensive pageResults covering ALL pages 1 to native.pageCount
+  const totalPages = Math.max(1, native.pageCount);
+  const pageResults: PageProcessingResult[] = [];
+
+  for (let pageNumber = 1; pageNumber <= totalPages; pageNumber++) {
+    const pair = byPage.get(pageNumber);
+    const pInfo = pageData.find((p) => p.pageNumber === pageNumber);
+    const pageImageCount = pInfo?.imageCount ?? 0;
+
+    const original = pair ? pair.original.join('\n') : (pInfo?.rawText || '');
+    const humanized = pair ? pair.humanized.join('\n') : '';
+    const wasOcrProcessed = ocrProcessedPages.has(pageNumber);
+    const hasReadableText = original.trim().length > 0;
+    const isModified = (humanized.length > 0 && original !== humanized) || (wasOcrProcessed && humanized.trim().length > 0);
+
+    if (!hasReadableText) {
+      pageResults.push({
         pageIndex: pageNumber - 1,
         pageNumber,
-        status: original === humanized ? ('SKIPPED' as const) : ('HUMANIZED' as const),
-        originalText: original,
-        humanizedText: humanized,
-        imageCount: 0,
-        errorReason:
-          original === humanized
-            ? 'Its blocks either got no new wording, or that wording would not have fitted the original slot'
-            : undefined,
+        status: 'SKIPPED',
+        originalText: '',
+        humanizedText: '',
+        imageCount: pageImageCount,
+        errorReason: 'Page contains images, graphics, or layout only with no readable text to humanize; kept exactly as uploaded',
         retryCount: 0,
         durationMs: 0,
-      };
+      });
+      continue;
+    }
+
+    pageResults.push({
+      pageIndex: pageNumber - 1,
+      pageNumber,
+      status: isModified ? 'HUMANIZED' : 'FAILED',
+      originalText: original,
+      humanizedText: isModified ? humanized : original,
+      imageCount: pageImageCount,
+      errorReason: !isModified ? 'Page text could not be rewritten safely within layout bounds' : undefined,
+      retryCount: 0,
+      durationMs: 0,
     });
+  }
 
   const notes = [...native.warnings, ...media.notes];
   if (native.changedUnits === 0 && native.providers.every((p) => p.includes('Built-In'))) {
@@ -812,11 +1036,12 @@ export async function runPdfHumanizationPipeline(params: {
     );
   }
 
+  const processedCount = pageResults.filter((r) => r.status === 'HUMANIZED').length;
   updatePdfJob(jobId, {
-    totalPages: native.pageCount,
+    totalPages,
     pageResults,
-    processedPages: pageResults.filter((r) => r.status === 'HUMANIZED').length,
-    failedPages: [],
+    processedPages: processedCount,
+    failedPages: pageResults.filter((r) => r.status === 'FAILED').map((r) => r.pageNumber),
     status: 'COMPLETED',
     progressPercent: 100,
     outputBuffer: native.buffer,
@@ -824,7 +1049,7 @@ export async function runPdfHumanizationPipeline(params: {
     layoutMode: 'IN_PLACE',
     preservationNotes: notes,
     humanizedUnits: native.changedUnits,
-    totalUnits: native.totalUnits,
+    totalUnits: Math.max(native.totalUnits || 0, processedCount),
     revertedUnits: native.revertedUnits,
     providers: native.providers,
     preservedImages: native.imageCount,

@@ -49,3 +49,4 @@ next-env.d.ts
 /scratch
 output_*.pdf
 *.code-workspace
+*.traineddata

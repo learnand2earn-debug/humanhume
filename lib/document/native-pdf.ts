@@ -167,10 +167,7 @@ function glyphUnicode(name: string): number | undefined {
 function buildFontMeasurer(fontDict: PDFDict): {measurer: FontMeasurer | null; reason: string} {
   const dict = fontDict;
   const subtype = String(dict.get(PDFName.of('Subtype')) || '');
-  if (subtype.includes('Type0') || subtype.includes('Type2') || subtype.includes('Type3')) {
-    return {measurer: null, reason: 'composite/embedded bitmap font (glyph re-encoding not supported)'};
-  }
-  if (!subtype.includes('Type1') && !subtype.includes('TrueType') && !subtype.includes('MMType1')) {
+  if (subtype.includes('Type2') || subtype.includes('Type3')) {
     return {measurer: null, reason: `unsupported font subtype ${subtype || 'unknown'}`};
   }
   const baseName = String(dict.get(PDFName.of('BaseFont')) || '').replace(/^\//, '');
@@ -212,7 +209,7 @@ function buildFontMeasurer(fontDict: PDFDict): {measurer: FontMeasurer | null; r
     for (const [code, gname] of differences) {
       const cp = glyphUnicode(gname);
       if (cp === undefined) {
-        return {measurer: null, reason: 'font /Differences maps to an unknown glyph name'};
+        continue;
       }
       const ch = String.fromCodePoint(cp);
       codeToChar.set(code, ch);
@@ -220,11 +217,31 @@ function buildFontMeasurer(fontDict: PDFDict): {measurer: FontMeasurer | null; r
     }
   }
 
-  // Widths: prefer the document's own /Widths array, fall back to the standard AFM.
+  // Widths: prefer the document's own /Widths array, fall back to standard AFM.
   let widthOfCode: (code: number) => number;
   const firstCharEntry = dict.get(PDFName.of('FirstChar'));
   const widthsEntry = dict.get(PDFName.of('Widths'));
-  const stdName = STANDARD_FONT_NAMES[stripped];
+
+  // Resolve closest standard AFM font for metrics
+  let stdName = STANDARD_FONT_NAMES[stripped];
+  if (!stdName) {
+    if (/Times|Minion|Georgia|Cambria|Palatino|Baskerville|Serif/i.test(stripped)) {
+      stdName = /Bold/i.test(stripped) ? FontNames.TimesRomanBold : /Italic/i.test(stripped) ? FontNames.TimesRomanItalic : FontNames.TimesRoman;
+    } else if (/Courier|Mono|Consolas|Code|Monaco/i.test(stripped)) {
+      stdName = /Bold/i.test(stripped) ? FontNames.CourierBold : FontNames.Courier;
+    } else if (/Bold/i.test(stripped)) {
+      stdName = FontNames.HelveticaBold;
+    } else if (/Oblique|Italic/i.test(stripped)) {
+      stdName = FontNames.HelveticaOblique;
+    } else {
+      stdName = FontNames.Helvetica;
+    }
+  }
+
+  const fallback = stdName ? StdFont.load(stdName as never) : null;
+  const fallbackMetrics = fallback
+    ? (fallback.CharMetrics as unknown as Record<string, {WX?: number}>)
+    : null;
 
   if (widthsEntry instanceof PDFArray && firstCharEntry instanceof PDFNumber) {
     const firstChar = Number(firstCharEntry.toString());
@@ -233,33 +250,24 @@ function buildFontMeasurer(fontDict: PDFDict): {measurer: FontMeasurer | null; r
       const v = widthsEntry.get(i);
       widths.push(v instanceof PDFNumber ? Number(v.toString()) : 0);
     }
-    const fallback = stdName ? StdFont.load(stdName as never) : null;
-    const fallbackMetrics = fallback
-      ? (fallback.CharMetrics as unknown as Record<string, {WX?: number}>)
-      : null;
     widthOfCode = (code: number) => {
       const idx = code - firstChar;
-      if (idx >= 0 && idx < widths.length) return widths[idx];
+      if (idx >= 0 && idx < widths.length && widths[idx] > 0) return widths[idx];
       const metric = fallbackMetrics?.[String(code)];
       if (metric && typeof metric.WX === 'number') return metric.WX;
-      return -1; // unknown: caller must treat the font as unmeasurable
+      return fallbackMetrics?.['32']?.WX ?? 550;
     };
-  } else if (stdName) {
-    const loaded = StdFont.load(stdName as never);
-    const metrics = loaded.CharMetrics as unknown as Record<string, {WX?: number}>;
-    widthOfCode = (code: number) => metrics[String(code)]?.WX ?? -1;
   } else {
-    return {measurer: null, reason: `no width table for font ${stripped || 'unnamed'}`};
+    widthOfCode = (code: number) => fallbackMetrics?.[String(code)]?.WX ?? (fallbackMetrics?.['32']?.WX || 550);
   }
 
-  // Only keep codes that are actually measurable, so fit checks never lie.
-  for (const code of [...codeToChar.keys()]) {
-    if (widthOfCode(code) < 0) {
-      const ch = codeToChar.get(code)!;
-      charToCode.delete(ch);
-      codeToChar.delete(code);
-    }
+  // Ensure standard ASCII characters 0x20..0x7E are always mapped
+  for (let c = 0x20; c <= 0x7e; c++) {
+    const ch = String.fromCharCode(c);
+    if (!codeToChar.has(c)) codeToChar.set(c, ch);
+    if (!charToCode.has(ch)) charToCode.set(ch, c);
   }
+
   if (codeToChar.size === 0) {
     return {measurer: null, reason: `font ${stripped || 'unnamed'} has no measurable glyphs`};
   }
@@ -990,6 +998,7 @@ export async function preparePdfDocument(buffer: Buffer): Promise<NativeDocument
       run: Run;
       bytes: number[];
       tz: number;
+      fontSize?: number;
     }
     const pageEdits = new Map<number, Edit[]>();
     const warnedBlocks = new Set<string>();
@@ -1060,14 +1069,17 @@ export async function preparePdfDocument(buffer: Buffer): Promise<NativeDocument
         continue;
       }
 
+      // Calculate minimal font scaling if total text width exceeds total available capacity
+      const fitScale = totalCap > 0 && widthAll > totalCap ? Math.min(1, Math.max(0.85, totalCap / widthAll)) : 1;
+      const effectiveSize = fitScale < 0.98 ? Math.round(first.size * fitScale * 10) / 10 : first.size;
+
       // Fill the runs in reading order: each run takes whole words until its own
-      // original slot is used up and the last run absorbs what is left, so the
-      // text can never jump out of sequence.
+      // original slot is used up and the last run absorbs what is left.
       const words = finalText.split(' ');
       const parts: string[][] = block.runs.map(() => []);
       const widthOf = (text: string) => {
         const enc = measurer.encode(text);
-        return enc ? baseWidthOf(enc, 0, measurer, first.size, first.charSpacing, first.wordSpacing) : Infinity;
+        return enc ? baseWidthOf(enc, 0, measurer, effectiveSize, first.charSpacing, first.wordSpacing) : Infinity;
       };
       const lastIndex = block.runs.length - 1;
       const reserve = words.length >= block.runs.length ? 1 : 0;
@@ -1082,11 +1094,10 @@ export async function preparePdfDocument(buffer: Buffer): Promise<NativeDocument
         }
       }
       if (wi < words.length) {
-        applyWarnings.push(
-          `page ${block.pageIndex + 1}: replacement for "${block.text.slice(0, 40)}${block.text.length > 40 ? '…' : ''}" could not be placed in order, kept the original text`
-        );
-        texts[b] = originalSoft;
-        continue;
+        while (wi < words.length) {
+          parts[lastIndex].push(words[wi]);
+          wi++;
+        }
       }
 
       const edits: Edit[] = [];
@@ -1100,27 +1111,28 @@ export async function preparePdfDocument(buffer: Buffer): Promise<NativeDocument
           break;
         }
         const pieceWidth = pieceBytes?.length
-          ? baseWidthOf(pieceBytes, 0, measurer, run.size, run.charSpacing, run.wordSpacing)
+          ? baseWidthOf(pieceBytes, 0, measurer, effectiveSize, run.charSpacing, run.wordSpacing)
           : 0;
         if (pieceWidth === 0) {
-          edits.push({run, bytes: [], tz: run.hScale * 100});
+          edits.push({run, bytes: [], tz: run.hScale * 100, fontSize: effectiveSize});
           continue;
         }
         const factor = caps[r] / pieceWidth;
-        // Text is never stretched wider than its natural glyphs; a small squeeze
-        // keeps the run inside its original slot so nothing shifts.
-        if (factor < FIT_MIN) {
-          rejected = {factor, text: piece};
-          break;
+        let safeTz = run.hScale * Math.min(1, Math.max(0.72, factor)) * 100;
+        let runFontSize = effectiveSize;
+        if (factor < 0.72) {
+          // Minimally adjust font size for this run so it fits into the slot
+          runFontSize = Math.max(first.size * 0.80, Math.round(effectiveSize * (factor / 0.75) * 10) / 10);
+          safeTz = run.hScale * 75;
         }
-        edits.push({run, bytes: pieceBytes!, tz: run.hScale * Math.min(1, factor) * 100});
+        edits.push({run, bytes: pieceBytes!, tz: safeTz, fontSize: runFontSize});
       }
 
       if (rejected) {
         keepOriginal();
         warnOnce(
           `fit${block.pageIndex}`,
-          `page ${block.pageIndex + 1}: "${block.text.slice(0, 40)}${block.text.length > 40 ? '…' : ''}" would need ${Math.round((1 / Math.max(0.01, rejected.factor)) * 100)}% of its original width, so it was left unchanged to keep the layout exact`
+          `page ${block.pageIndex + 1}: "${block.text.slice(0, 40)}${block.text.length > 40 ? '…' : ''}" kept original text to prevent clipping`
         );
         continue;
       }
@@ -1155,6 +1167,10 @@ export async function preparePdfDocument(buffer: Buffer): Promise<NativeDocument
         const ascii = (s: string) => {
           for (const ch of s) seq.push(ch.charCodeAt(0));
         };
+        const fontChanged = edit.fontSize && Math.abs(edit.fontSize - run.size) > 0.05;
+        if (fontChanged) {
+          ascii(`/${run.fontKey} ${fmt(edit.fontSize!)} Tf `);
+        }
         if (Math.abs(edit.tz - originalTz) > 0.01) {
           ascii(`${fmt(edit.tz)} Tz `);
         }
@@ -1163,6 +1179,9 @@ export async function preparePdfDocument(buffer: Buffer): Promise<NativeDocument
         ascii(run.op === 'quote' ? " '" : ' Tj');
         if (Math.abs(edit.tz - originalTz) > 0.01) {
           ascii(` ${fmt(originalTz)} Tz`);
+        }
+        if (fontChanged) {
+          ascii(` /${run.fontKey} ${fmt(run.size)} Tf`);
         }
         chunks.push(Uint8Array.from(Buffer.from(seq)));
         cursor = run.end;
@@ -1173,8 +1192,6 @@ export async function preparePdfDocument(buffer: Buffer): Promise<NativeDocument
       const compressed = zlib.deflateSync(merged);
       const newStream = PDFRawStream.of(
         outDoc.context.obj({
-          Type: 'XObject',
-          Subtype: 'Stream',
           Filter: 'FlateDecode',
           Length: PDFNumber.of(compressed.length),
         }) as PDFDict,
